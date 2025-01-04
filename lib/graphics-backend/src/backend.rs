@@ -48,6 +48,7 @@ pub type CustomPipelines = Arc<RwLock<Vec<Box<dyn BackendCustomPipeline>>>>;
 #[derive(Debug)]
 enum GraphicsBackendLoadingIoType {
     Vulkan(VulkanBackendLoadingIo),
+    WgpuVulkan(VulkanBackendLoadingIo),
     Null,
 }
 
@@ -61,6 +62,9 @@ impl GraphicsBackendIoLoading {
         Self {
             backend_io: match config_gfx.backend.to_ascii_lowercase().as_str() {
                 "vulkan" => GraphicsBackendLoadingIoType::Vulkan(VulkanBackendLoadingIo::new(io)),
+                "wgpu_vulkan" => {
+                    GraphicsBackendLoadingIoType::WgpuVulkan(VulkanBackendLoadingIo::new(io))
+                }
                 _ => GraphicsBackendLoadingIoType::Null,
             },
         }
@@ -179,6 +183,17 @@ impl GraphicsBackendBase {
         let backend_mt = backend_loading.backend.init(
             match io_loading.backend_io {
                 GraphicsBackendLoadingIoType::Vulkan(data) => BackendThreadInitData::Vulkan {
+                    data: VulkanBackendLoadedIo {
+                        shader_compiler: data.shader_compiler.get_storage()?,
+                        pipeline_cache: data.pipeline_cache.get_storage()?,
+                    },
+                    runtime_threadpool: runtime_threadpool.clone(),
+                    window_width: size.width,
+                    window_height: size.height,
+                    dbg: backend_loading.config_dbg,
+                    gl: backend_loading.config_gl.clone(),
+                },
+                GraphicsBackendLoadingIoType::WgpuVulkan(data) => BackendThreadInitData::Vulkan {
                     data: VulkanBackendLoadedIo {
                         shader_compiler: data.shader_compiler.get_storage()?,
                         pipeline_cache: data.pipeline_cache.get_storage()?,

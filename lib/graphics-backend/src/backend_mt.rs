@@ -12,6 +12,7 @@ use hiarc::Hiarc;
 #[derive(Debug, Hiarc)]
 pub enum GraphicsBackendMtType {
     Vulkan(VulkanBackendMt),
+    WgpuVulkan(VulkanBackendMt),
     Null(NullBackendMt),
 }
 
@@ -19,6 +20,7 @@ impl GraphicsBackendMtType {
     pub fn unwrap(&self) -> &dyn GraphicsBackendMtInterface {
         match self {
             Self::Vulkan(backend) => backend,
+            Self::WgpuVulkan(backend) => backend,
             Self::Null(backend) => backend,
         }
     }
@@ -26,6 +28,7 @@ impl GraphicsBackendMtType {
     pub fn gpus(&self) -> Arc<Gpus> {
         match self {
             GraphicsBackendMtType::Vulkan(backend) => backend.gpus.clone(),
+            GraphicsBackendMtType::WgpuVulkan(backend) => backend.gpus.clone(),
             GraphicsBackendMtType::Null(_) => Arc::new(Gpus {
                 auto: Gpu {
                     name: "null".to_string(),

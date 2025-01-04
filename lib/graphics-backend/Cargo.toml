@@ -51,6 +51,7 @@ log = "0.4.22"
 either = "1.13.0"
 replace_with = "0.1.7"
 crossbeam = "0.8.4"
+wgpu = "23.0.1"
 
 #[cfg(test)]
 base-http = { path = "../base-http" }

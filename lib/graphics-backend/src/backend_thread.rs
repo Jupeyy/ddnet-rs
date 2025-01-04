@@ -39,6 +39,7 @@ use crate::{
             },
             Options,
         },
+        wgpu::{Wgpu, WgpuLoading, WgpuMainThreadData},
     },
     window::{BackendDisplayRequirements, BackendWindow},
 };
@@ -46,12 +47,14 @@ use crate::{
 #[derive(Debug)]
 enum GraphicsBackendLoadingType {
     Vulkan(VulkanBackendLoading),
+    WgpuVulkan(WgpuLoading),
     Null(NullBackend),
 }
 
 #[derive(Debug, Hiarc)]
 enum GraphicsBackendType {
     Vulkan(Box<VulkanBackend>),
+    WgpuVulkan(Box<Wgpu>),
     Null(NullBackend),
 }
 
@@ -59,6 +62,7 @@ impl GraphicsBackendType {
     pub fn as_mut(&mut self) -> &mut dyn DriverBackendInterface {
         match self {
             GraphicsBackendType::Vulkan(backend) => backend.as_mut(),
+            GraphicsBackendType::WgpuVulkan(backend) => backend.as_mut(),
             GraphicsBackendType::Null(backend) => backend,
         }
     }
@@ -76,18 +80,30 @@ pub enum BackendThreadInitData {
         dbg: ConfigDebug,
         gl: ConfigBackend,
     },
+    WgpuVulkan {
+        data: VulkanBackendLoadedIo,
+
+        runtime_threadpool: Arc<rayon::ThreadPool>,
+
+        window_width: u32,
+        window_height: u32,
+        dbg: ConfigDebug,
+        gl: ConfigBackend,
+    },
     Null,
 }
 
 #[derive(Debug, Hiarc)]
 pub enum BackendThreadInitFromMainThread {
     Vulkan(VulkanMainThreadData),
+    WgpuVulkan(VulkanMainThreadData),
     Null,
 }
 
 #[derive(Debug, Hiarc)]
 pub enum BackendThreadMainThreadInit {
     Vulkan(VulkanMainThreadInit),
+    WgpuVulkan(VulkanMainThreadInit),
     Null,
 }
 
@@ -252,6 +268,15 @@ impl BackendThread {
                     GraphicsBackendMtType::Vulkan(backend_mt),
                 )
             }
+            BackendThreadInitFromMainThread::WgpuVulkan(data) => {
+                let backend_mt = VulkanBackend::create_mt_backend(&data);
+                (
+                    BackendThreadMainThreadInit::WgpuVulkan(VulkanBackend::init_from_main_thread(
+                        data, window, dbg,
+                    )?),
+                    GraphicsBackendMtType::WgpuVulkan(backend_mt),
+                )
+            }
             BackendThreadInitFromMainThread::Null => (
                 BackendThreadMainThreadInit::Null,
                 GraphicsBackendMtType::Null(NullBackend::get_mt_backend()),
@@ -280,6 +305,10 @@ impl BackendThread {
             BackendThreadInitFromMainThread::Vulkan(data) => {
                 VulkanBackend::init_from_main_thread(data, &window, dbg)
                     .map(BackendThreadMainThreadInit::Vulkan)
+            }
+            BackendThreadInitFromMainThread::WgpuVulkan(data) => {
+                VulkanBackend::init_from_main_thread(data, &window, dbg)
+                    .map(BackendThreadMainThreadInit::WgpuVulkan)
             }
             BackendThreadInitFromMainThread::Null => Ok(BackendThreadMainThreadInit::Null),
         }?;
@@ -380,6 +409,23 @@ impl BackendThread {
         };
         let backend_loading = match backend_ty.to_ascii_lowercase().as_str() {
             "null" => GraphicsBackendLoadingType::Null(NullBackend {}),
+            "wgpu_vulkan" => {
+                let options = Options {
+                    dbg: &config_dbg,
+                    gl: &config_gl,
+                };
+                // prepare the GL instance
+                let backend = WgpuLoading::new(
+                    display_requirements,
+                    texture_memory_usage,
+                    buffer_memory_usage,
+                    stream_memory_usage,
+                    staging_memory_usage,
+                    &options,
+                    custom_pipes,
+                )?;
+                GraphicsBackendLoadingType::WgpuVulkan(backend)
+            }
             // "vulkan"
             _ => {
                 let options = Options {
@@ -406,6 +452,11 @@ impl BackendThread {
                     BackendThreadInitFromMainThread::Vulkan(VulkanBackend::main_thread_data(
                         loading,
                     ))
+                }
+                GraphicsBackendLoadingType::WgpuVulkan(loading) => {
+                    BackendThreadInitFromMainThread::WgpuVulkan(
+                        WgpuMainThreadData::main_thread_data(loading),
+                    )
                 }
                 GraphicsBackendLoadingType::Null(_) => BackendThreadInitFromMainThread::Null,
             },
@@ -449,11 +500,38 @@ impl BackendThread {
                     write_files,
                 )?)
             }
+            BackendThreadInitData::WgpuVulkan {
+                data,
+                runtime_threadpool,
+                window_width,
+                window_height,
+                dbg,
+                gl,
+            } => {
+                let GraphicsBackendLoadingType::WgpuVulkan(loading) = backend_loading else {
+                    return Err(anyhow!("loading was not of type vulkan"));
+                };
+                let BackendThreadMainThreadInit::WgpuVulkan(main_thread_init) = main_thread_init
+                else {
+                    return Err(anyhow!("main thread init data was not of type vulkan"));
+                };
+                GraphicsBackendType::WgpuVulkan(VulkanBackend::new(
+                    loading,
+                    data,
+                    &runtime_threadpool,
+                    main_thread_init,
+                    window_width,
+                    window_height,
+                    &Options { dbg: &dbg, gl: &gl },
+                    write_files,
+                )?)
+            }
             BackendThreadInitData::Null => GraphicsBackendType::Null(NullBackend {}),
         };
 
         enum InUseDataPerBackend {
             Vulkan(VulkanInUseStreamData),
+            WgpuVulkan(VulkanInUseStreamData),
             Null,
         }
 
@@ -499,6 +577,47 @@ impl BackendThread {
                     InUseDataPerBackend::Vulkan(next_stream_data),
                 )
             }
+            GraphicsBackendType::WgpuVulkan(backend) => {
+                let stream_data = backend.get_stream_data()?;
+                let next_stream_data = backend.get_stream_data()?;
+
+                let mem = unsafe {
+                    stream_data.cur_stream_vertex_buffer.memories[0]
+                        .mapped_memory
+                        .get_mem_typed::<GlVertex>(StreamDataMax::MaxVertices as usize)
+                };
+
+                let mut graphics_uniform_data = backend.props.graphics_uniform_buffers.new();
+                graphics_uniform_data.extend(
+                    stream_data
+                        .cur_stream_uniform_buffers
+                        .memories
+                        .iter()
+                        .map(|uni| unsafe {
+                            GraphicsStreamedUniformData::new(GraphicsStreamedUniformRawData::Raw(
+                                GraphicsStreamUniformRawDataStatic::new(
+                                    uni.mapped_memory.get_mem(
+                                        GRAPHICS_MAX_UNIFORM_RENDER_COUNT
+                                            * GRAPHICS_DEFAULT_UNIFORM_SIZE,
+                                    ),
+                                    Box::new(stream_data.cur_stream_uniform_buffers.clone()),
+                                ),
+                            ))
+                        }),
+                );
+
+                (
+                    GraphicsStreamedData::new(
+                        GraphicsStreamVertices::Static(GraphicsStreamVerticesStatic::new(
+                            mem,
+                            Box::new(stream_data.cur_stream_vertex_buffer.clone()),
+                        )),
+                        graphics_uniform_data,
+                    ),
+                    InUseDataPerBackend::WgpuVulkan(stream_data),
+                    InUseDataPerBackend::WgpuVulkan(next_stream_data),
+                )
+            }
             GraphicsBackendType::Null(_) => (
                 GraphicsStreamedData::new(
                     GraphicsStreamVertices::Vec(Default::default()),
@@ -531,6 +650,12 @@ impl BackendThread {
                     match &in_use_data {
                         InUseDataPerBackend::Vulkan(data) => {
                             let GraphicsBackendType::Vulkan(backend) = &mut backend else {
+                                return Err(anyhow!("not a vulkan backend"));
+                            };
+                            backend.set_stream_data_in_use(&stream_data_cmd, data)?;
+                        }
+                        InUseDataPerBackend::WgpuVulkan(data) => {
+                            let GraphicsBackendType::WgpuVulkan(backend) = &mut backend else {
                                 return Err(anyhow!("not a vulkan backend"));
                             };
                             backend.set_stream_data_in_use(&stream_data_cmd, data)?;
@@ -595,6 +720,52 @@ impl BackendThread {
                                 InUseDataPerBackend::Vulkan(stream_data),
                             )
                         }
+                        GraphicsBackendType::WgpuVulkan(backend) => {
+                            let stream_data = backend.get_stream_data()?;
+
+                            let mem = unsafe {
+                                stream_data.cur_stream_vertex_buffer.memories[0]
+                                    .mapped_memory
+                                    .get_mem_typed::<GlVertex>(StreamDataMax::MaxVertices as usize)
+                            };
+
+                            let mut graphics_uniform_data =
+                                backend.props.graphics_uniform_buffers.new();
+                            graphics_uniform_data.extend(
+                                stream_data.cur_stream_uniform_buffers.memories.iter().map(
+                                    |uni| unsafe {
+                                        GraphicsStreamedUniformData::new(
+                                            GraphicsStreamedUniformRawData::Raw(
+                                                GraphicsStreamUniformRawDataStatic::new(
+                                                    uni.mapped_memory.get_mem(
+                                                        GRAPHICS_MAX_UNIFORM_RENDER_COUNT
+                                                            * GRAPHICS_DEFAULT_UNIFORM_SIZE,
+                                                    ),
+                                                    Box::new(
+                                                        stream_data
+                                                            .cur_stream_uniform_buffers
+                                                            .clone(),
+                                                    ),
+                                                ),
+                                            ),
+                                        )
+                                    },
+                                ),
+                            );
+
+                            (
+                                GraphicsStreamedData::new(
+                                    GraphicsStreamVertices::Static(
+                                        GraphicsStreamVerticesStatic::new(
+                                            mem,
+                                            Box::new(stream_data.cur_stream_vertex_buffer.clone()),
+                                        ),
+                                    ),
+                                    graphics_uniform_data,
+                                ),
+                                InUseDataPerBackend::WgpuVulkan(stream_data),
+                            )
+                        }
                         GraphicsBackendType::Null(_) => (
                             GraphicsStreamedData::new(
                                 GraphicsStreamVertices::Vec(Default::default()),
@@ -621,12 +792,20 @@ impl BackendThread {
                         GraphicsBackendType::Vulkan(backend) => {
                             BackendThreadInitFromMainThread::Vulkan(backend.get_main_thread_data())
                         }
+                        GraphicsBackendType::WgpuVulkan(backend) => {
+                            BackendThreadInitFromMainThread::WgpuVulkan(
+                                backend.get_main_thread_data(),
+                            )
+                        }
                         GraphicsBackendType::Null(_) => BackendThreadInitFromMainThread::Null,
                     })?;
                 }
                 BackendThreadBackendEvent::WindowDestroyNtfy(sender) => {
                     match &mut backend {
                         GraphicsBackendType::Vulkan(backend) => {
+                            backend.surface_lost()?;
+                        }
+                        GraphicsBackendType::WgpuVulkan(backend) => {
                             backend.surface_lost()?;
                         }
                         GraphicsBackendType::Null(_) => {}
@@ -637,6 +816,12 @@ impl BackendThread {
                 {
                     GraphicsBackendType::Vulkan(backend) => {
                         let BackendThreadMainThreadInit::Vulkan(data) = main_thread_init else {
+                            return Err(anyhow!("created window must be for vulkan type."));
+                        };
+                        backend.set_from_main_thread(data)?;
+                    }
+                    GraphicsBackendType::WgpuVulkan(backend) => {
+                        let BackendThreadMainThreadInit::WgpuVulkan(data) = main_thread_init else {
                             return Err(anyhow!("created window must be for vulkan type."));
                         };
                         backend.set_from_main_thread(data)?;
