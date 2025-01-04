@@ -653,10 +653,12 @@ pub mod character {
                 .push_effect(Some(self.base.game_element_id), pos, ev);
         }
 
-        fn handle_game_layer_tiles(&mut self, tile: &Tile, res: &mut CharacterDamageResult) {
+        fn handle_game_layer_tiles(&mut self, tile: &Tile) -> CharacterDamageResult {
             if tile.index == DdraceTileNum::Death as u8 {
                 self.die(None, GameWorldActionKillWeapon::World, Default::default());
-                *res = CharacterDamageResult::Death;
+                CharacterDamageResult::Death
+            } else {
+                CharacterDamageResult::None
             }
         }
 
@@ -666,7 +668,7 @@ pub mod character {
             let cur_pos = *self.pos.pos();
             collision.intersect_line_feedback(&old_pos, &cur_pos, |tile| match tile {
                 HitTile::Game(tile) => {
-                    self.handle_game_layer_tiles(tile, &mut res);
+                    res = self.handle_game_layer_tiles(tile);
                 }
                 HitTile::Front(tile) => {
                     if tile.index == DdraceTileNum::Death as u8 {

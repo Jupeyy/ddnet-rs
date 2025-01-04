@@ -53,6 +53,7 @@ members = [
     "examples/wasm-modules/graphics",
     "examples/wasm-modules/mainmenu",
     "examples/wasm-modules/ingame_menu",
+    "fng/",
     "src/server-bin",
     "src/emoticon-convert",
     "src/game-convert",

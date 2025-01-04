@@ -1,0 +1,47 @@
+[package]
+name = "fng"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+api = { path = "../lib/api" }
+api-macros = { path = "../lib/api-macros" }
+base-io = { path = "../lib/base-io" }
+math = { path = "../lib/math" }
+base = { path = "../lib/base" }
+config = { path = "../lib/config" }
+graphics-types = { path = "../lib/graphics-types" }
+pool = { path = "../lib/pool" }
+hiarc = { path = "../lib/hiarc", features = ["derive", "enable_hashlink", "enable_rustc_hash"] }
+api-wasm-macros = { path = "../lib/api-wasm-macros" }
+game-database = { path = "../lib/game-database" }
+command-parser = { path = "../lib/command-parser" }
+
+api-state = { path = "../game/api-state" }
+game-base = { path = "../game/game-base" }
+vanilla = { path = "../game/vanilla" }
+game-interface = { path = "../game/game-interface" }
+map = { path = "../game/map" }
+
+ddnet-accounts-types = { version = "0.1.0" }
+
+rayon = "1.10.0"
+arrayvec = { version = "0.7.6", features = ["serde"] }
+num = "0.4.3"
+num-derive = "0.4.2"
+num-traits = "0.2.19"
+bincode = { features = ["serde"], version = "2.0.0-rc.3" }
+flate2 = "1.0.35"
+anyhow = { version = "1.0.95", features = ["backtrace"] }
+async-trait = "0.1.83"
+hashlink = { git = "https://github.com/Jupeyy/hashlink/", branch = "ddnet", features = ["serde", "serde_impl"] }
+serde = "1.0.217"
+thiserror = "2.0.9"
+log = "0.4.22"
+chrono = { version = "0.4.39", default-features = false, features = ["serde"] }
+serde_json = "1.0.134"
+rustc-hash = "2.1.0"
+bitflags = { version = "2.6.0", features = ["serde"] }
+
+[lib]
+crate-type = ["cdylib"]
