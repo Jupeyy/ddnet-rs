@@ -14,7 +14,7 @@ pub mod packet_compressor;
 pub mod packet_dict;
 pub mod plugins;
 pub mod quinn_network;
-pub mod quinnminimal;
+pub mod s2n_network;
 pub mod traits;
 pub mod tungstenite_network;
 pub mod types;

@@ -11,7 +11,7 @@ use rustls::{crypto::CryptoProvider, pki_types::PrivateKeyDer};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use x509_cert::der::{Decode, Encode};
 
-use super::{
+use crate::network::{
     traits::NUM_BIDI_STREAMS,
     types::{
         NetworkClientCertCheckMode, NetworkClientCertMode, NetworkClientInitOptions,

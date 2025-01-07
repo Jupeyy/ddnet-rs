@@ -5,13 +5,16 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex}, task::Poll,
 };
 
 use anyhow::anyhow;
+use futures_util::AsyncReadExt;
 use num_traits::FromPrimitive;
 use pool::mt_datatypes::PoolVec;
-use quinn::{ConnectError, ConnectionError, SendDatagramError};
+use s2n_quic::{
+    application, client::{Connect, ConnectionAttempt}, connection::{BidirectionalStreamAcceptor, Handle, ReceiveStreamAcceptor}, provider::datagram::default::Receiver, stream::{BidirectionalStream, ReceiveStream, SendStream} 
+};
 use spki::der::Decode;
 use tokio::io::AsyncWriteExt;
 
@@ -31,31 +34,30 @@ use super::{
         NetworkServerCertModeResult, NetworkServerInitOptions,
     },
 };
-use setup::{make_client_endpoint, make_server_endpoint};
 
 #[derive(Default)]
-pub struct QuinnNetworkConnectingWrapperChannel {
+pub struct S2nNetworkConnectingWrapperChannel {
     in_order_packets: VecDeque<PoolVec<u8>>,
-    open_bi: Option<(quinn::SendStream, quinn::RecvStream)>,
+    open_bi: Option<(SendStream, ReceiveStream)>,
 }
 
 #[derive(Clone)]
-pub struct QuinnNetworkConnectionWrapper {
-    con: quinn::Connection,
+pub struct S2nNetworkConnectionWrapper {
+    handle: Handle,bi_acceptor: Arc<Mutex< BidirectionalStreamAcceptor>>,uni_acceptor:Arc<Mutex< ReceiveStreamAcceptor>>,
     channels: Arc<
         std::sync::Mutex<
             HashMap<
                 NetworkInOrderChannel,
-                Arc<tokio::sync::Mutex<QuinnNetworkConnectingWrapperChannel>>,
+                Arc<tokio::sync::Mutex<S2nNetworkConnectingWrapperChannel>>,
             >,
         >,
     >,
     stream_window: usize,
 }
 
-impl QuinnNetworkConnectionWrapper {
+impl S2nNetworkConnectionWrapper {
     async fn write_bytes_chunked(
-        send_stream: &mut quinn::SendStream,
+        send_stream: &mut SendStream,
         packet: PoolVec<u8>,
     ) -> anyhow::Result<()> {
         let packet_len = packet.len() as u64;
@@ -73,29 +75,58 @@ impl QuinnNetworkConnectionWrapper {
 }
 
 #[async_trait::async_trait]
-impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
+impl NetworkConnectionInterface for S2nNetworkConnectionWrapper {
     async fn send_unreliable_unordered(
         &self,
         data: PoolVec<u8>,
     ) -> anyhow::Result<(), (PoolVec<u8>, UnreliableUnorderedError)> {
         let pack_bytes = bytes::Bytes::copy_from_slice(&data[..]);
         let res = self
-            .con
-            .send_datagram(pack_bytes)
+            .handle
+            .datagram_mut(
+                |sender: &mut s2n_quic::provider::datagram::default::Sender| match sender
+                    .send_datagram(pack_bytes)
+                {
+                    Ok(_) => Ok(()),
+                    Err(err) => match err {
+                        s2n_quic::provider::datagram::default::DatagramError::QueueAtCapacity {..} => Err((data, UnreliableUnorderedError::TooLarge)),
+                        s2n_quic::provider::datagram::default::DatagramError::ExceedsPeerTransportLimits {..} => Err((data, UnreliableUnorderedError::TooLarge)),
+                        s2n_quic::provider::datagram::default::DatagramError::ConnectionError { error, .. } => Err((data, UnreliableUnorderedError::ConnectionClosed(error.into()))),
+                        _ => Err((data, UnreliableUnorderedError::ConnectionClosed(anyhow!("Unimplemented error!")))),
+                                            
+                    },
+                },
+            )
             .map_err(|err| match err {
-                SendDatagramError::Disabled | SendDatagramError::UnsupportedByPeer => {
-                    (data, UnreliableUnorderedError::Disabled)
+                s2n_quic::provider::event::query::Error::ConnectionLockPoisoned => {
+                    (PoolVec::new_without_pool(), UnreliableUnorderedError::ConnectionClosed(err.into()))
                 }
-                SendDatagramError::ConnectionLost(err) => {
-                    (data, UnreliableUnorderedError::ConnectionClosed(err.into()))
+                s2n_quic::provider::event::query::Error::ContextTypeMismatch => {
+                    (PoolVec::new_without_pool(), UnreliableUnorderedError::ConnectionClosed(err.into()))
                 }
-                SendDatagramError::TooLarge => (data, UnreliableUnorderedError::TooLarge),
+                _ => (PoolVec::new_without_pool(), UnreliableUnorderedError::ConnectionClosed(err.into())),
             })?;
-        Ok(res)
+        /*.send_datagram(pack_bytes)
+        .map_err(|err| match err {
+            SendDatagramError::Disabled | SendDatagramError::UnsupportedByPeer => {
+                (data, UnreliableUnorderedError::Disabled)
+            }
+            SendDatagramError::ConnectionLost(err) => {
+                (data, UnreliableUnorderedError::ConnectionClosed(err.into()))
+            }
+            SendDatagramError::TooLarge => (data, UnreliableUnorderedError::TooLarge),
+        })?;*/
+        res
     }
 
-    async fn read_unreliable_unordered(&self) -> anyhow::Result<Vec<u8>> {
-        let res = self.con.read_datagram().await;
+    async fn read_unreliable_unordered(&self) -> anyhow::Result<Vec<u8>> {        
+        let res = futures_util::future::poll_fn(|cx| {
+            match self.handle.datagram_mut(|recv: &mut Receiver| recv.poll_recv_datagram(cx)) {
+                Ok(poll_value) => poll_value.map(Ok),
+                Err(query_err) => Poll::Ready(Err(query_err)),
+            }
+        })
+        .await?;
         match res {
             Ok(res) => Ok(res.to_vec()),
             Err(err) => Err(anyhow!(err.to_string())),
@@ -103,7 +134,9 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
     }
 
     async fn send_unordered_reliable(&self, data: PoolVec<u8>) -> anyhow::Result<()> {
-        let uni = self.con.open_uni().await;
+        let uni =  futures_util::future::poll_fn(|cx| {
+            self.handle.clone().poll_open_send_stream(cx)
+       }).await;
         if let Ok(mut stream) = uni {
             let written_bytes = stream.write_all(data.as_slice()).await;
             if let Err(_written_bytes) = written_bytes {
@@ -133,15 +166,19 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
         &self,
         on_data: F,
     ) -> anyhow::Result<()> {
-        let uni = self.con.accept_uni().await;
+        let uni = futures_util::future::poll_fn(|cx| {
+             self.uni_acceptor.lock().unwrap().poll_accept_receive_stream(cx) 
+        })
+        .await?;
         let stream_window = self.stream_window;
         match uni {
-            Ok(mut recv_stream) => {
+            Some(mut recv_stream) => {
                 tokio::spawn(async move {
-                    match recv_stream.read_to_end(stream_window).await {
+                    let mut pkt = Vec::default();
+                    match recv_stream.read_to_end(&mut pkt).await {
                         Ok(read_res) => {
                             // ignore error
-                            let _ = on_data(Ok(read_res)).await;
+                            let _ = on_data(Ok(pkt)).await;
                         }
                         Err(read_err) => {
                             on_data(Err(anyhow!(format!(
@@ -155,9 +192,8 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
                 });
                 anyhow::Ok(())
             }
-            Err(recv_err) => Err(anyhow!(format!(
-                "connection stream acception failed {}",
-                recv_err
+            None => Err(anyhow!(format!(
+                "connection was closed",
             ))),
         }
     }
@@ -204,8 +240,10 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
                 if let Some((send_stream, _)) = cur_channel.open_bi.as_mut() {
                     Self::write_bytes_chunked(send_stream, packet).await
                 } else {
-                    match self.con.open_bi().await {
-                        Ok((send, recv)) => {
+                    match futures_util::future::poll_fn(|cx| {
+                        self.handle.clone().poll_open_bidirectional_stream(cx)
+                   }).await.map(|s| s.split()) {
+                        Ok(  ( recv, send)) => {
                             cur_channel.open_bi = Some((send, recv));
                             Self::write_bytes_chunked(
                                 &mut cur_channel.open_bi.as_mut().unwrap().0,
@@ -231,8 +269,10 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
         on_data: F,
     ) -> anyhow::Result<()> {
         let stream_window = self.stream_window;
-        match self.con.accept_bi().await {
-            Ok((_, mut recv_stream)) => {
+        match futures_util::future::poll_fn(|cx| {
+            self.bi_acceptor.lock().unwrap().poll_accept_bidirectional_stream(cx)
+       }).await?.map(|s| s.split()) {
+            Some(( mut recv_stream, _)) => {
                 tokio::spawn(async move {
                     let mut len_buff: [u8; std::mem::size_of::<u64>()] = Default::default();
                     'read_loop: loop {
@@ -268,20 +308,20 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
                 });
                 Ok(())
             }
-            Err(err) => {
-                return Err(anyhow!(err.to_string()));
+            None => {
+                return Err(anyhow!("Connection was closed"));
             }
         }
     }
 
     async fn close(&self, error_code: ConnectionErrorCode, reason: &str) {
-        self.con
-            .close((error_code as u32).into(), reason.as_bytes());
-        self.con.closed().await;
-    }
+        self.handle
+            .close(application::Error::new(error_code as u64).unwrap());
+            }
 
     fn close_reason(&self) -> Option<NetworkEventDisconnect> {
-        self.con.close_reason().map(|err| match err {
+        None
+        /*self.handle.close_reason().map(|err| match err {
             ConnectionError::VersionMismatch
             | ConnectionError::CidsExhausted
             | ConnectionError::TransportError(_) => NetworkEventDisconnect::Other(err.to_string()),
@@ -317,21 +357,21 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
             }
             ConnectionError::TimedOut => NetworkEventDisconnect::TimedOut,
             ConnectionError::LocallyClosed => NetworkEventDisconnect::LocallyClosed,
-        })
+        })*/
     }
 
     fn remote_addr(&self) -> SocketAddr {
-        self.con.remote_address()
+        self.handle.remote_addr().unwrap()
     }
 
     fn peer_identity(&self) -> x509_cert::Certificate {
-        let certs = self.con.peer_identity().unwrap();
+        let certs = self.handle.peer_identity().unwrap();
         let certs: &Vec<rustls::pki_types::CertificateDer> = certs.downcast_ref().unwrap();
         x509_cert::Certificate::from_der(&certs[0]).unwrap()
     }
 
     fn stats(&self) -> ConnectionStats {
-        let mut stats = self.con.stats();
+        let mut stats = self.handle.stats();
 
         stats.path.rtt = self.con.rtt();
 
@@ -345,13 +385,13 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
     }
 }
 
-pub struct QuinnNetworkConnectingWrapper {
-    connecting: quinn::Connecting,
+pub struct S2nNetworkConnectingWrapper {
+    connecting: ConnectionAttempt,
     stream_window: usize,
 }
 
-impl Future for QuinnNetworkConnectingWrapper {
-    type Output = Result<QuinnNetworkConnectionWrapper, NetworkEventConnectingFailed>;
+impl Future for S2nNetworkConnectingWrapper {
+    type Output = Result<S2nNetworkConnectionWrapper, NetworkEventConnectingFailed>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -359,11 +399,15 @@ impl Future for QuinnNetworkConnectingWrapper {
     ) -> std::task::Poll<Self::Output> {
         let con = Pin::new(&mut self.connecting).poll(cx);
         con.map(|f| match f {
-            Ok(connection) => Ok(QuinnNetworkConnectionWrapper {
-                con: connection,
+            Ok(connection) => {
+                let (handle, acceptor) = connection.split();
+                let (bi, uni) = acceptor.split();
+                Ok(S2nNetworkConnectionWrapper {
+                handle,bi_acceptor: Arc::new(Mutex::new(bi)),uni_acceptor: Arc::new(Mutex::new(uni)),
+
                 channels: Default::default(),
                 stream_window: self.stream_window,
-            }),
+            })},
             Err(err) => Err(match err {
                 ConnectionError::VersionMismatch
                 | ConnectionError::CidsExhausted
@@ -411,24 +455,24 @@ impl Future for QuinnNetworkConnectingWrapper {
     }
 }
 
-impl NetworkConnectingInterface<QuinnNetworkConnectionWrapper> for QuinnNetworkConnectingWrapper {
+impl NetworkConnectingInterface<S2nNetworkConnectionWrapper> for S2nNetworkConnectingWrapper {
     fn remote_addr(&self) -> SocketAddr {
         self.connecting.remote_address()
     }
 }
 
-pub struct QuinnNetworkIncomingWrapper {
+pub struct S2nNetworkIncomingWrapper {
     inc: quinn::Incoming,
     stream_window: usize,
 }
 
-impl NetworkIncomingInterface<QuinnNetworkConnectingWrapper> for QuinnNetworkIncomingWrapper {
+impl NetworkIncomingInterface<S2nNetworkConnectingWrapper> for S2nNetworkIncomingWrapper {
     fn remote_addr(&self) -> SocketAddr {
         self.inc.remote_address()
     }
 
-    fn accept(self) -> anyhow::Result<QuinnNetworkConnectingWrapper> {
-        Ok(QuinnNetworkConnectingWrapper {
+    fn accept(self) -> anyhow::Result<S2nNetworkConnectingWrapper> {
+        Ok(S2nNetworkConnectingWrapper {
             connecting: self.inc.accept()?,
             stream_window: self.stream_window,
         })
@@ -436,39 +480,34 @@ impl NetworkIncomingInterface<QuinnNetworkConnectingWrapper> for QuinnNetworkInc
 }
 
 #[derive(Clone)]
-pub struct QuinnEndpointWrapper {
-    endpoint: quinn::Endpoint,
+enum Endpoint {
+    Client(s2n_quic::Client),
+    Server(Arc<s2n_quic::Server>),
+}
+
+#[derive(Clone)]
+pub struct S2nEndpointWrapper {
+    endpoint: Endpoint,
     must_retry_inc: bool,
     stream_window: usize,
 }
 
 #[async_trait::async_trait]
-impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomingWrapper>
-    for QuinnEndpointWrapper
+impl NetworkEndpointInterface<S2nNetworkConnectingWrapper, S2nNetworkIncomingWrapper>
+    for S2nEndpointWrapper
 {
     fn connect(
         &self,
         addr: std::net::SocketAddr,
         server_name: &str,
-    ) -> anyhow::Result<QuinnNetworkConnectingWrapper, NetworkEventConnectingFailed> {
-        let res = self
-            .endpoint
-            .connect(addr, server_name)
-            .map_err(|err| match err {
-                ConnectError::CidsExhausted
-                | ConnectError::EndpointStopping
-                | ConnectError::NoDefaultClientConfig
-                | ConnectError::UnsupportedVersion => {
-                    NetworkEventConnectingFailed::Other(err.to_string())
-                }
-                ConnectError::InvalidServerName(name) => {
-                    NetworkEventConnectingFailed::InvalidServerName(name)
-                }
-                ConnectError::InvalidRemoteAddress(socket_addr) => {
-                    NetworkEventConnectingFailed::InvalidRemoteAddress(socket_addr)
-                }
-            })?;
-        Ok(QuinnNetworkConnectingWrapper {
+    ) -> anyhow::Result<S2nNetworkConnectingWrapper, NetworkEventConnectingFailed> {
+        let Endpoint::Client(endpoint) = &self.endpoint else {
+            return Err(NetworkEventConnectingFailed::Other(
+                "Connect can only be called from a client endpoint".to_string(),
+            ));
+        };
+        let res = endpoint.connect(Connect::new(addr).with_server_name(server_name));
+        Ok(S2nNetworkConnectingWrapper {
             connecting: res,
             stream_window: self.stream_window,
         })
@@ -513,12 +552,12 @@ impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomin
         })
     }
 
-    async fn accept(&self) -> Option<QuinnNetworkIncomingWrapper> {
+    async fn accept(&self) -> Option<S2nNetworkIncomingWrapper> {
         while let Some(inc) = self.endpoint.accept().await {
             if self.must_retry_inc && !inc.remote_address_validated() {
                 inc.retry().unwrap();
             } else {
-                return Some(QuinnNetworkIncomingWrapper {
+                return Some(S2nNetworkIncomingWrapper {
                     inc,
                     stream_window: self.stream_window,
                 });
@@ -532,25 +571,25 @@ impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomin
     }
 }
 
-pub type QuinnNetworks = Networks<
-    QuinnEndpointWrapper,
-    QuinnNetworkConnectionWrapper,
-    QuinnNetworkConnectingWrapper,
-    QuinnNetworkIncomingWrapper,
+pub type S2nNetworks = Networks<
+    S2nEndpointWrapper,
+    S2nNetworkConnectionWrapper,
+    S2nNetworkConnectingWrapper,
+    S2nNetworkIncomingWrapper,
 >;
 
-pub type QuinnNetwork = Network<
-    QuinnEndpointWrapper,
-    QuinnNetworkConnectionWrapper,
-    QuinnNetworkConnectingWrapper,
-    QuinnNetworkIncomingWrapper,
+pub type S2nNetwork = Network<
+    S2nEndpointWrapper,
+    S2nNetworkConnectionWrapper,
+    S2nNetworkConnectingWrapper,
+    S2nNetworkIncomingWrapper,
     0,
 >;
 
-pub type QuinnNetworkAsync = NetworkAsync<
-    QuinnEndpointWrapper,
-    QuinnNetworkConnectionWrapper,
-    QuinnNetworkConnectingWrapper,
-    QuinnNetworkIncomingWrapper,
+pub type S2nNetworkAsync = NetworkAsync<
+    S2nEndpointWrapper,
+    S2nNetworkConnectionWrapper,
+    S2nNetworkConnectingWrapper,
+    S2nNetworkIncomingWrapper,
     0,
 >;
