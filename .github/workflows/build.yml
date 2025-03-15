@@ -130,6 +130,10 @@ jobs:
     - name: Build server release
       run: cargo build -p server --release --verbose --features bundled_data_dir
 
+    - name: Run release
+      run: |
+        cargo run --release --verbose --features ${{ matrix.features }} -- quit
+
     - name: Clippy release
       if: contains(matrix.os, 'ubuntu')
       run: |
