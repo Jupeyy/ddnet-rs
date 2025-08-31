@@ -420,6 +420,10 @@ struct ClientNativeImpl {
     // input & helper
     inp_manager: InputHandling,
 
+    // auto updater, should be at the end
+    #[cfg(feature = "auto_updater")]
+    _auto_updater: auto_updater::AutoUpdater,
+
     // put graphics at the end, so it's dropped last
     graphics: Graphics,
     graphics_backend: Rc<GraphicsBackend>,
@@ -2948,6 +2952,18 @@ impl FromNativeLoadingImpl<ClientNativeLoadingImpl> for GraphicsApp<ClientNative
         local_console.ui.ui_state.is_ui_open = false;
 
         let mut client = GraphicsApp::new(ClientNativeImpl {
+            #[cfg(feature = "auto_updater")]
+            _auto_updater: auto_updater::AutoUpdater::new(
+                &io,
+                "ddnet",
+                "ddnet-rs",
+                "nightly",
+                #[cfg(feature = "enable_steam")]
+                "-steam",
+                #[cfg(not(feature = "enable_steam"))]
+                "",
+            ),
+
             menu_map,
 
             cur_time,

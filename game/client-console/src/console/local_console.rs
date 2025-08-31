@@ -935,12 +935,13 @@ impl LocalConsoleBuilder {
             allows_partial_cmds: false,
         }));
 
+        let console_events_cmd = console_events.clone();
         list.push(ConsoleEntry::Cmd(ConsoleEntryCmd {
             name: "quit".into(),
             usage: "quit the client".into(),
             description: "Closes the client.".into(),
             cmd: Rc::new(move |_, _, _, _| {
-                console_events.push(LocalConsoleEvent::Quit);
+                console_events_cmd.push(LocalConsoleEvent::Quit);
                 Ok("Bye bye".to_string())
             }),
             args: vec![],
