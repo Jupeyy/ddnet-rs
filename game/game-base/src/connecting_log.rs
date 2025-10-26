@@ -12,11 +12,27 @@ pub enum ConnectModes {
     DisconnectErr { msg: String },
 }
 
+#[derive(Debug, Default, Clone, Hiarc)]
+pub enum ConnectingState {
+    DownloadingMap {
+        map_name: String,
+        downloaded_bytes: u64,
+        total_download_bytes: u64,
+        download_speed_bytes_per_second: u64,
+    },
+    Other(String),
+
+    #[default]
+    None,
+}
+
 #[hiarc_safer_arc_mutex]
 #[derive(Debug, Default, Hiarc)]
 pub struct ConnectingLog {
     log: VecDeque<String>,
     mode: Option<ConnectModes>,
+
+    state: ConnectingState,
 }
 
 #[hiarc_safer_arc_mutex]
@@ -45,5 +61,13 @@ impl ConnectingLog {
 
     pub fn mode(&self) -> Option<ConnectModes> {
         self.mode.clone()
+    }
+
+    pub fn set_state(&mut self, state: ConnectingState) {
+        self.state = state;
+    }
+
+    pub fn state(&self) -> ConnectingState {
+        self.state.clone()
     }
 }

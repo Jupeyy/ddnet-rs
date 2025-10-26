@@ -4,6 +4,7 @@
 pub mod actionfeed;
 pub mod chat;
 pub mod connect;
+pub mod connect2;
 pub mod console;
 pub mod demo_player;
 pub mod emote_wheel;

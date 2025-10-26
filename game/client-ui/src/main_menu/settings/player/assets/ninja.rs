@@ -57,6 +57,7 @@ pub fn ninja_list(
                 pos,
                 asset_size,
                 TeeEye::Normal,
+                None,
             );
         },
         |_, name| {

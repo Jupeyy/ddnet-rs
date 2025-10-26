@@ -69,6 +69,7 @@ pub fn render_tee_for_ui_with_skin(
     pos: vec2,
     size: f32,
     eyes: TeeEye,
+    anim_state: Option<AnimState>,
 ) {
     #[derive(Debug)]
     struct RenderTeeCb {
@@ -81,13 +82,17 @@ pub fn render_tee_for_ui_with_skin(
         canvas_handle: GraphicsCanvasHandle,
         render_tee: RenderTee,
         eyes: TeeEye,
+        anim_state: Option<AnimState>,
         opacity: f32,
     }
     impl CustomCallbackTrait for RenderTeeCb {
         fn render(&self) {
-            let mut anim_state = AnimState::default();
-            anim_state.set(&base_anim(), &Duration::from_millis(0));
-            anim_state.add(&idle_anim(), &Duration::from_millis(0), 1.0);
+            let anim_state = self.anim_state.unwrap_or_else(|| {
+                let mut anim_state = AnimState::default();
+                anim_state.set(&base_anim(), &Duration::from_millis(0));
+                anim_state.add(&idle_anim(), &Duration::from_millis(0), 1.0);
+                anim_state
+            });
 
             let (color_body, color_feet) = if let Some(NetworkSkinInfo::Custom {
                 body_color,
@@ -155,6 +160,7 @@ pub fn render_tee_for_ui_with_skin(
         canvas_handle: canvas_handle.clone(),
         render_tee: render_tee.clone(),
         eyes,
+        anim_state,
         opacity: ui.opacity(),
     };
 
@@ -189,6 +195,7 @@ pub fn render_tee_for_ui(
         pos,
         size,
         eyes,
+        None,
     )
 }
 
