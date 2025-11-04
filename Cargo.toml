@@ -46,6 +46,7 @@ members = [
   "examples/wasm-modules/state",
   "examples/wasm-modules/ui",
   "examples/wasm-modules/vote",
+  "fng/",
   "game/api-auto-mapper",
   "game/api-editor",
   "game/api-render-game",
