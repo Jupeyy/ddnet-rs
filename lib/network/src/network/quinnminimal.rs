@@ -364,12 +364,17 @@ fn configure_server(
     };
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut server_config = ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(
-        rustls::ServerConfig::builder_with_provider(provider.clone())
-            .with_safe_default_protocol_versions()?
-            .with_client_cert_verifier(Arc::new(ServerClientCertVerifier(provider.clone())))
-            .with_single_cert(cert_chain, priv_key)?,
-    )?));
+    let mut tls_config = rustls::ServerConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()?
+        .with_client_cert_verifier(Arc::new(ServerClientCertVerifier(provider.clone())))
+        .with_single_cert(cert_chain, priv_key)?;
+    if !options.trusted_proxies.public_key_hashes.is_empty() {
+        // Forwarding metadata belongs to this handshake, never a resumed session.
+        tls_config.send_tls13_tickets = 0;
+        tls_config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    }
+    let mut server_config =
+        ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls_config)?));
     // For now disable migration. Before enabling it think about ip bans
     // since those would be affected most by this. Maybe account-only
     // servers could allow it or similar.

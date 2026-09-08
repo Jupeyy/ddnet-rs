@@ -420,6 +420,7 @@ impl<C: NetworkConnectionInterface + Send + Sync + Clone + 'static, const TY: u3
                         return;
                     }
                     Ok(conn) => {
+                        let remote_addr = conn.remote_addr();
                         let con_cert = conn.peer_identity();
                         // insert connection
                         connection = Arc::new(NetworkConnection::<C> { conn });
