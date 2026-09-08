@@ -591,6 +591,12 @@ pub const MAX_SERVER_NAME_LEN: usize = 64;
 #[config_default]
 #[derive(Debug, Clone, Serialize, Deserialize, ConfigInterface)]
 pub struct ConfigServer {
+    /// Optional Ed25519 PKCS#8 PEM private-key file for standalone servers.
+    /// Path within the server filesystem; created in writable storage.
+    /// Created if absent. Empty uses a fresh key on every startup.
+    #[default = ""]
+    pub private_key_file: String,
+
     #[conf_valid(length(max = MAX_SERVER_NAME_LEN))]
     #[default = "unnamed server"]
     pub name: String,

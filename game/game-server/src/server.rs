@@ -21,7 +21,10 @@ use base_io::{
     io::Io,
     runtime::{IoRuntime, IoRuntimeTask},
 };
-use base_io_traits::http_traits::HttpClientInterface;
+use base_io_traits::{
+    fs_traits::{FileSystemPath, FileSystemType},
+    http_traits::HttpClientInterface,
+};
 use command_parser::parser::{self, CommandArg, CommandArgType, CommandType, ParserCache, Syn};
 use config::{config::ConfigEngine, traits::ConfigInterface};
 use ddnet_account_client_http_fs::{
@@ -29,7 +32,7 @@ use ddnet_account_client_http_fs::{
 };
 use ddnet_accounts_shared::game_server::user_id::{UserId, VerifyingKey};
 use demo::recorder::{DemoRecorder, DemoRecorderCreateProps, DemoRecorderCreatePropsBase};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{SigningKey, pkcs8::EncodePrivateKey};
 use either::Either;
 use game_config::config::{ConfigDebug, ConfigGame, ConfigServer, ConfigServerDatabase};
 use game_database::{
@@ -641,7 +644,7 @@ impl Server {
     pub fn new(
         time: SteadyClock,
         is_open: Arc<AtomicBool>,
-        cert_and_private_key: (x509_cert::Certificate, SigningKey),
+        forced_cert_and_private_key: Option<(x509_cert::Certificate, SigningKey)>,
         shared_info: Arc<LocalServerInfo>,
         port_v4: u16,
         port_v6: u16,
@@ -653,6 +656,41 @@ impl Server {
         cache: ParserCache,
         raw_rcon_input: &[String],
     ) -> anyhow::Result<Self> {
+        let cert_and_private_key = if let Some(cert) = forced_cert_and_private_key {
+            Either::Left(cert)
+        } else if !config_game.sv.private_key_file.is_empty() {
+            let path = PathBuf::from(&config_game.sv.private_key_file);
+            let fs = io.fs.clone();
+            Either::Right(io.rt.spawn(async move {
+                match fs
+                    .read_file_in(&path, FileSystemPath::OfType(FileSystemType::ReadWrite))
+                    .await
+                {
+                    Ok(pem) => {
+                        network::network::utils::certified_keys_from_pem(std::str::from_utf8(&pem)?)
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                        if let Some(parent) = path
+                            .parent()
+                            .filter(|parent| !parent.as_os_str().is_empty())
+                        {
+                            fs.create_dir(parent).await?;
+                        }
+                        let cert_and_private_key =
+                            network::network::utils::create_certifified_keys();
+                        let pem = cert_and_private_key
+                            .1
+                            .to_pkcs8_pem(x509_cert::der::pem::LineEnding::LF)?;
+                        fs.write_file(&path, pem.as_bytes().to_vec()).await?;
+                        Ok(cert_and_private_key)
+                    }
+                    Err(err) => Err(err.into()),
+                }
+            }))
+        } else {
+            Either::Left(network::network::utils::create_certifified_keys())
+        };
+
         let config_db = config_game.sv.db.clone();
         let accounts_enabled = !config_db.enable_accounts.is_empty();
         let task = Self::db_setup_task(&io.rt, config_db);
@@ -756,6 +794,10 @@ impl Server {
             packet_plugins.push(Arc::new(DefaultNetworkPacketCompressor::new()));
         }
 
+        let cert_and_private_key = match cert_and_private_key {
+            Either::Left(cert) => cert,
+            Either::Right(task) => task.get()?,
+        };
         let cert_sha256_fingerprint = cert_and_private_key
             .0
             .tbs_certificate
@@ -3710,7 +3752,7 @@ pub fn load_config() -> (Io, ConfigEngine, ConfigGame) {
 
 pub fn ddnet_server_main<const IS_INTERNAL_SERVER: bool>(
     time: SteadyClock,
-    cert_and_private_key: (x509_cert::Certificate, SigningKey),
+    forced_cert_and_private_key: Option<(x509_cert::Certificate, SigningKey)>,
     is_open: Arc<AtomicBool>,
     shared_info: Arc<LocalServerInfo>,
     args: Vec<String>,
@@ -3768,7 +3810,7 @@ pub fn ddnet_server_main<const IS_INTERNAL_SERVER: bool>(
     let mut server = Server::new(
         time,
         is_open,
-        cert_and_private_key,
+        forced_cert_and_private_key,
         shared_info,
         if IS_INTERNAL_SERVER {
             config_game.sv.port_internal
