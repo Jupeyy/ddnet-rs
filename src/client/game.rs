@@ -4,7 +4,6 @@ pub mod types;
 
 use std::{
     borrow::Cow,
-    net::SocketAddr,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -731,12 +730,7 @@ impl Game {
         let render_props = RenderGameCreateOptions {
             physics_group_name: info.server_options.physics_group_name.clone(),
             resource_http_download_url: Some(HTTP_RESOURCE_URL.try_into().unwrap()),
-            resource_download_server: info.resource_server_fallback.map(|port| {
-                format!("http://{}", SocketAddr::new(connect.addr.ip(), port))
-                    .as_str()
-                    .try_into()
-                    .unwrap()
-            }),
+            resource_download_server: connect.resource_download_url(info.resource_server_fallback),
             fonts: base.fonts.clone(),
             sound_props: Default::default(),
             render_mod: RenderModTy::render_mod(&info.render_mod, pipe.config_game),
@@ -836,16 +830,9 @@ impl Game {
                     let render_props = RenderGameCreateOptions {
                         physics_group_name: info.server_options.physics_group_name.clone(),
                         resource_http_download_url: Some(HTTP_RESOURCE_URL.try_into().unwrap()),
-                        resource_download_server: info.resource_server_fallback.map(|port| {
-                            Url::try_from(
-                                format!(
-                                    "http://{}",
-                                    SocketAddr::new(connecting.connect.addr.ip(), port)
-                                )
-                                .as_str(),
-                            )
-                            .unwrap()
-                        }),
+                        resource_download_server: connecting
+                            .connect
+                            .resource_download_url(info.resource_server_fallback),
                         fonts: connecting.base.fonts.clone(),
                         sound_props: Default::default(),
                         render_mod: RenderModTy::render_mod(&info.render_mod, pipe.config_game),

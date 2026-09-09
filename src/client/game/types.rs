@@ -74,6 +74,35 @@ pub struct GameConnect {
     pub browser_data: ServerBrowserData,
 }
 
+impl GameConnect {
+    pub fn resource_download_url(&self, fallback_port: Option<u16>) -> Option<url::Url> {
+        self.browser_data
+            .list()
+            .find(self.addr)
+            .and_then(|server| {
+                server
+                    .info
+                    .resource_server_url
+                    .as_ref()
+                    .and_then(|value| value.parse::<url::Url>().ok())
+            })
+            .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+            .map(|mut url| {
+                if !url.path().ends_with('/') {
+                    url.set_path(&format!("{}/", url.path()));
+                }
+                url
+            })
+            .or_else(|| {
+                fallback_port.map(|port| {
+                    format!("http://{}/", SocketAddr::new(self.addr.ip(), port))
+                        .parse()
+                        .unwrap()
+                })
+            })
+    }
+}
+
 pub struct GameNetwork {
     pub network: QuinnNetwork,
     pub game_event_generator_client: Arc<GameEventGenerator<ServerToClientMessage<'static>>>,

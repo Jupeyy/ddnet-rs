@@ -611,6 +611,9 @@ pub struct ConfigServer {
     pub port_v4: u16,
     #[default = 8311]
     pub port_v6: u16,
+    /// External HTTP(S) assets base URL. Empty starts the built-in download server.
+    #[default = ""]
+    pub resource_server_url: String,
     /// The ipv4 port to use for the resource download server
     #[default = 0]
     pub download_server_port_v4: u16,

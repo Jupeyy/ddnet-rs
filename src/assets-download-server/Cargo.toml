@@ -1,0 +1,18 @@
+[package]
+name = "assets-download-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base = { path = "../../lib/base" }
+base-fs = { path = "../../lib/base-fs", default-features = false }
+base-http = { path = "../../lib/base-http" }
+base-io = { path = "../../lib/base-io" }
+base-io-traits = { path = "../../lib/base-io-traits" }
+
+game-server = { path = "../../game/game-server" }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+tokio = { version = "1", features = ["signal"] }

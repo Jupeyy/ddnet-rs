@@ -422,6 +422,7 @@ impl ServerGame {
         download_server_port_v4: u16,
         download_server_port_v6: u16,
         server_provided_assets_path: Option<&Path>,
+        spawn_resource_server: bool,
     ) -> anyhow::Result<Self> {
         let fs = io.fs.clone();
         let required_resources = io.rt.spawn(async move {
@@ -534,7 +535,7 @@ impl ServerGame {
         }
 
         Ok(Self {
-            http_server: {
+            http_server: if spawn_resource_server {
                 Some(Self::prepare_download_server(
                     &map_name,
                     map_hash,
@@ -557,6 +558,8 @@ impl ServerGame {
                     download_server_port_v4,
                     download_server_port_v6,
                 )?)
+            } else {
+                None
             },
 
             players: Default::default(),

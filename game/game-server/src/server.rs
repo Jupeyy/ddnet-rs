@@ -977,6 +977,7 @@ impl Server {
                 } else {
                     None
                 },
+                config_game.sv.resource_server_url.is_empty(),
             )?,
 
             last_tick_time: time.now(),
@@ -1078,6 +1079,7 @@ impl Server {
                 game_mod: self.game_server.game_mod.clone(),
                 render_mod: self.game_server.render_mod.clone(),
                 mod_config: self.game_server.game.info.config.clone(),
+
                 resource_server_fallback: self.game_server.http_server.as_ref().map(|server| {
                     match ip {
                         IpAddr::V4(_) => server.port_v4,
@@ -2893,6 +2895,8 @@ impl Server {
 
         let settings = self.game_server.game.settings();
         let mut register_info = ServerBrowserInfo {
+            resource_server_url: (!self.config_game.sv.resource_server_url.is_empty())
+                .then(|| self.config_game.sv.resource_server_url.clone()),
             name: self.config_game.sv.name.as_str().try_into().unwrap(),
             game_type: self.game_server.game.info.mod_name.clone(),
             version: self.game_server.game.info.version.clone(),
@@ -3663,6 +3667,7 @@ impl Server {
             } else {
                 None
             },
+            self.config_game.sv.resource_server_url.is_empty(),
         )?;
         if let Some(snapshot) = snapshot {
             self.game_server
@@ -3692,6 +3697,7 @@ impl Server {
                     game_mod: self.game_server.game_mod.clone(),
                     render_mod: self.game_server.render_mod.clone(),
                     hint_start_camera_pos: self.game_server.game.get_client_camera_join_pos(),
+
                     resource_server_fallback: self.game_server.http_server.as_ref().map(|server| {
                         match client.ip {
                             IpAddr::V4(_) => server.port_v4,

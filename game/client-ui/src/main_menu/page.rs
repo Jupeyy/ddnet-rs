@@ -230,6 +230,7 @@ impl MainMenuUi {
                             .map(|addr| SocketAddr::new(addr.ip, addr.port))
                             .collect(),
                         info: ServerBrowserInfo {
+                            resource_server_url: None,
                             name: info.name.try_into().unwrap_or_default(),
                             game_type: info.game_type.try_into().unwrap_or_default(),
                             version: info.version.try_into().unwrap_or_default(),
