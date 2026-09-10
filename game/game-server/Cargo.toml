@@ -39,21 +39,35 @@ ddnet-account-game-server = { version = "0.4", features = ["sqlite"] }
 ddnet-accounts-shared = { version = "0.3" }
 
 anyhow = { version = "1", features = ["backtrace"] }
+arc-swap = "1"
 async-trait = "0.1"
+axum = "0.8"
+axum-server = { version = "0.8", default-features = false, features = [
+  "tls-rustls-no-provider",
+] }
 bincode = { version = "2", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 difference = "2.0"
 ed25519-dalek = { version = "2" }
 either = "1"
 futures = "0.3"
+hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
 rand = { version = "0.10", features = ["thread_rng"], default-features = false }
 rayon = "1"
 rustc-hash = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thread-priority = "3"
+tokio = { version = "1", features = ["net", "rt", "macros", "time"] }
 tracing = { version = "0.1", default-features = false, features = [
   "attributes",
 ] }
+url = "2"
 x509-cert = { version = "0.2" }
+
+[dev-dependencies]
+tokio-rustls = { version = "0.26", default-features = false, features = [
+  "ring",
+] }

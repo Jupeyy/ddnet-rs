@@ -199,11 +199,10 @@ impl ShaderCompiler {
                         .await?;
 
                     let shader_file = shader_from_cache
-                        .chunks_exact(std::mem::size_of::<u32>())
-                        .map(|val| {
-                            let val = [val[0], val[1], val[2], val[3]];
-                            u32::from_le_bytes(val)
-                        })
+                        .as_chunks::<{ std::mem::size_of::<u32>() }>()
+                        .0
+                        .iter()
+                        .map(|val| u32::from_le_bytes(*val))
                         .collect();
 
                     Ok::<(String, Vec<u32>), anyhow::Error>((file_to_compile.output, shader_file))

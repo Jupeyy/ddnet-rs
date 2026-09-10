@@ -74,6 +74,7 @@ use super::{
 
 pub struct MainMenuIo {
     pub(crate) io: Io,
+    master_servers: Arc<Vec<url::Url>>,
     cur_servers_task: Option<IoRuntimeTask<Vec<ServerBrowserServer>>>,
     cur_ddnet_info_task: Option<IoRuntimeTask<DdnetInfo>>,
     cur_demos_task: Option<IoRuntimeTask<DemoList>>,
@@ -83,7 +84,10 @@ pub struct MainMenuIo {
 
 impl MainMenuInterface for MainMenuIo {
     fn refresh(&mut self) {
-        self.cur_servers_task = Some(MainMenuUi::req_server_list(&self.io));
+        self.cur_servers_task = Some(MainMenuUi::req_server_list(
+            &self.io,
+            self.master_servers.clone(),
+        ));
     }
 
     fn refresh_demo_list(&mut self, path: &Path) {
@@ -189,16 +193,20 @@ impl MainMenuUi {
 
     pub async fn download_server_list(
         http: &Arc<dyn HttpClientInterface>,
+        urls: &[url::Url],
     ) -> anyhow::Result<Vec<ServerBrowserServer>> {
-        Self::json_to_server_browser(
-            &http
-                .download_text(
-                    "https://pg.ddnet.org:4444/ddnet/15/servers.json"
-                        .try_into()
-                        .unwrap(),
-                )
-                .await?,
-        )
+        let mut error = anyhow::anyhow!("no server list URLs configured");
+        for url in urls {
+            let result = async {
+                Self::json_to_server_browser(&http.download_text(url.join("servers.json")?).await?)
+            }
+            .await;
+            match result {
+                Ok(servers) => return Ok(servers),
+                Err(err) => error = err,
+            }
+        }
+        Err(error)
     }
 
     pub fn legacy_json_to_server_browser(
@@ -230,6 +238,7 @@ impl MainMenuUi {
                             .map(|addr| SocketAddr::new(addr.ip, addr.port))
                             .collect(),
                         info: ServerBrowserInfo {
+                            resource_server_url: None,
                             name: info.name.try_into().unwrap_or_default(),
                             game_type: info.game_type.try_into().unwrap_or_default(),
                             version: info.version.try_into().unwrap_or_default(),
@@ -314,11 +323,14 @@ impl MainMenuUi {
         )
     }
 
-    pub fn req_server_list(io: &Io) -> IoRuntimeTask<Vec<ServerBrowserServer>> {
+    pub fn req_server_list(
+        io: &Io,
+        master_servers: Arc<Vec<url::Url>>,
+    ) -> IoRuntimeTask<Vec<ServerBrowserServer>> {
         let http = io.http.clone();
         io.rt
             .spawn(async move {
-                let res = Self::download_server_list(&http).await;
+                let res = Self::download_server_list(&http, &master_servers).await;
 
                 let res_legacy = Self::download_legacy_server_list(&http).await;
 
@@ -358,10 +370,11 @@ impl MainMenuUi {
         console_entries: Vec<ConsoleEntry>,
         raw_input_info: RawInputInfo,
         browser_data: ServerBrowserData,
+        master_servers: Arc<Vec<url::Url>>,
         features: EnabledFeatures,
         ddnet_info_req: Arc<dyn DdnetInfoRequest>,
     ) -> Self {
-        let cur_servers_task = Self::req_server_list(&io);
+        let cur_servers_task = Self::req_server_list(&io, master_servers.clone());
         let cur_ddnet_info_task = Self::req_ddnet_info(
             &io,
             config_game
@@ -425,6 +438,7 @@ impl MainMenuUi {
             demo_info: None,
 
             menu_io: MainMenuIo {
+                master_servers,
                 io: io.clone(),
                 cur_ddnet_info_task: Some(cur_ddnet_info_task),
                 cur_servers_task: Some(cur_servers_task),

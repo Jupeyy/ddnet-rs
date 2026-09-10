@@ -50,9 +50,15 @@ pub struct QuinnNetworkConnectionWrapper {
         >,
     >,
     stream_window: usize,
+    forwarded_identity: Option<super::proxy::ForwardedIdentity>,
 }
 
 impl QuinnNetworkConnectionWrapper {
+    /// Actual transport peer, which may be a trusted proxy.
+    pub fn transport_remote_addr(&self) -> SocketAddr {
+        self.con.remote_address()
+    }
+
     async fn write_bytes_chunked(
         send_stream: &mut quinn::SendStream,
         packet: PoolVec<u8>,
@@ -314,10 +320,15 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
     }
 
     fn remote_addr(&self) -> SocketAddr {
-        self.con.remote_address()
+        self.forwarded_identity
+            .as_ref()
+            .map_or_else(|| self.con.remote_address(), |identity| identity.addr)
     }
 
     fn peer_identity(&self) -> x509_cert::Certificate {
+        if let Some(identity) = &self.forwarded_identity {
+            return identity.cert.clone();
+        }
         let certs = self.con.peer_identity().unwrap();
         let certs: &Vec<rustls::pki_types::CertificateDer> = certs.downcast_ref().unwrap();
         x509_cert::Certificate::from_der(&certs[0]).unwrap()
@@ -343,6 +354,7 @@ impl NetworkConnectionInterface for QuinnNetworkConnectionWrapper {
 pub struct QuinnNetworkConnectingWrapper {
     connecting: quinn::Connecting,
     stream_window: usize,
+    trusted_proxies: Arc<super::proxy::TrustedProxies>,
 }
 
 impl Future for QuinnNetworkConnectingWrapper {
@@ -354,11 +366,27 @@ impl Future for QuinnNetworkConnectingWrapper {
     ) -> std::task::Poll<Self::Output> {
         let con = Pin::new(&mut self.connecting).poll(cx);
         con.map(|f| match f {
-            Ok(connection) => Ok(QuinnNetworkConnectionWrapper {
-                con: connection,
-                channels: Default::default(),
-                stream_window: self.stream_window,
-            }),
+            Ok(connection) => {
+                let mut wrapper = QuinnNetworkConnectionWrapper {
+                    con: connection,
+                    channels: Default::default(),
+                    stream_window: self.stream_window,
+                    forwarded_identity: None,
+                };
+                match self.trusted_proxies.resolve(&wrapper.peer_identity()) {
+                    Ok(identity) => {
+                        wrapper.forwarded_identity = identity;
+                        Ok(wrapper)
+                    }
+                    Err(err) => {
+                        wrapper.con.close(
+                            (ConnectionErrorCode::Kicked as u32).into(),
+                            b"invalid proxy identity",
+                        );
+                        Err(NetworkEventConnectingFailed::Other(err.to_string()))
+                    }
+                }
+            }
             Err(err) => Err(match err {
                 ConnectionError::VersionMismatch
                 | ConnectionError::CidsExhausted
@@ -415,6 +443,7 @@ impl NetworkConnectingInterface<QuinnNetworkConnectionWrapper> for QuinnNetworkC
 pub struct QuinnNetworkIncomingWrapper {
     inc: quinn::Incoming,
     stream_window: usize,
+    trusted_proxies: Arc<super::proxy::TrustedProxies>,
 }
 
 impl NetworkIncomingInterface<QuinnNetworkConnectingWrapper> for QuinnNetworkIncomingWrapper {
@@ -426,6 +455,7 @@ impl NetworkIncomingInterface<QuinnNetworkConnectingWrapper> for QuinnNetworkInc
         Ok(QuinnNetworkConnectingWrapper {
             connecting: self.inc.accept()?,
             stream_window: self.stream_window,
+            trusted_proxies: self.trusted_proxies.clone(),
         })
     }
 }
@@ -435,6 +465,7 @@ pub struct QuinnEndpointWrapper {
     endpoint: quinn::Endpoint,
     must_retry_inc: bool,
     stream_window: usize,
+    trusted_proxies: Arc<super::proxy::TrustedProxies>,
 }
 
 #[async_trait::async_trait]
@@ -466,6 +497,7 @@ impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomin
         Ok(QuinnNetworkConnectingWrapper {
             connecting: res,
             stream_window: self.stream_window,
+            trusted_proxies: self.trusted_proxies.clone(),
         })
     }
 
@@ -485,6 +517,7 @@ impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomin
             Self {
                 endpoint,
                 must_retry_inc: !options.disable_retry_on_connect,
+                trusted_proxies: Arc::new(options.trusted_proxies.clone()),
                 stream_window: options
                     .base
                     .stream_receive_window
@@ -503,6 +536,7 @@ impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomin
         Ok(Self {
             endpoint: res,
             must_retry_inc: false,
+            trusted_proxies: Default::default(),
             stream_window: options
                 .base
                 .stream_receive_window
@@ -518,6 +552,7 @@ impl NetworkEndpointInterface<QuinnNetworkConnectingWrapper, QuinnNetworkIncomin
                 return Some(QuinnNetworkIncomingWrapper {
                     inc,
                     stream_window: self.stream_window,
+                    trusted_proxies: self.trusted_proxies.clone(),
                 });
             }
         }

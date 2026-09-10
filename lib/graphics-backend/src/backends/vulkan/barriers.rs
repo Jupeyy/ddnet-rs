@@ -227,22 +227,17 @@ pub fn memory_barrier(
     barrier.offset = offset;
     barrier.size = size;
 
-    let source_stage;
-    let destination_stage;
-
-    if before_command {
+    let (source_stage, destination_stage) = if before_command {
         barrier.src_access_mask = buffer_access_type;
         barrier.dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
 
-        source_stage = source_stage_flags;
-        destination_stage = vk::PipelineStageFlags::TRANSFER;
+        (source_stage_flags, vk::PipelineStageFlags::TRANSFER)
     } else {
         barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
         barrier.dst_access_mask = buffer_access_type;
 
-        source_stage = vk::PipelineStageFlags::TRANSFER;
-        destination_stage = source_stage_flags;
-    }
+        (vk::PipelineStageFlags::TRANSFER, source_stage_flags)
+    };
 
     unsafe {
         device.device.cmd_pipeline_barrier(

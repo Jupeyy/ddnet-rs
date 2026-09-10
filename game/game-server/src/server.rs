@@ -21,7 +21,10 @@ use base_io::{
     io::Io,
     runtime::{IoRuntime, IoRuntimeTask},
 };
-use base_io_traits::http_traits::HttpClientInterface;
+use base_io_traits::{
+    fs_traits::{FileSystemPath, FileSystemType},
+    http_traits::HttpClientInterface,
+};
 use command_parser::parser::{self, CommandArg, CommandArgType, CommandType, ParserCache, Syn};
 use config::{config::ConfigEngine, traits::ConfigInterface};
 use ddnet_account_client_http_fs::{
@@ -29,7 +32,7 @@ use ddnet_account_client_http_fs::{
 };
 use ddnet_accounts_shared::game_server::user_id::{UserId, VerifyingKey};
 use demo::recorder::{DemoRecorder, DemoRecorderCreateProps, DemoRecorderCreatePropsBase};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{SigningKey, pkcs8::EncodePrivateKey};
 use either::Either;
 use game_config::config::{ConfigDebug, ConfigGame, ConfigServer, ConfigServerDatabase};
 use game_database::{
@@ -203,9 +206,12 @@ pub struct Server {
     time: SteadyClock,
 
     last_tick_time: Duration,
+    master_servers: Arc<Vec<url::Url>>,
     last_register_time: Option<Duration>,
     register_task: Option<IoRuntimeTask<()>>,
     last_register_serial: u32,
+    last_register_info: Arc<arc_swap::ArcSwap<ServerBrowserInfo>>,
+    _s2s: Option<crate::s2s::Server>,
 
     last_network_stats_time: Duration,
 
@@ -641,7 +647,7 @@ impl Server {
     pub fn new(
         time: SteadyClock,
         is_open: Arc<AtomicBool>,
-        cert_and_private_key: (x509_cert::Certificate, SigningKey),
+        forced_cert_and_private_key: Option<(x509_cert::Certificate, SigningKey)>,
         shared_info: Arc<LocalServerInfo>,
         port_v4: u16,
         port_v6: u16,
@@ -653,6 +659,60 @@ impl Server {
         cache: ParserCache,
         raw_rcon_input: &[String],
     ) -> anyhow::Result<Self> {
+        let master_servers = {
+            let fs = io.fs.clone();
+            io.rt
+                .spawn(async move { Ok(game_base::server_list_urls::load(fs.as_ref()).await) })
+        };
+
+        let cert_and_private_key = if let Some(cert) = forced_cert_and_private_key {
+            Either::Left(cert)
+        } else if !config_game.sv.private_key_file.is_empty() {
+            let path = PathBuf::from(&config_game.sv.private_key_file);
+            let fs = io.fs.clone();
+            Either::Right(io.rt.spawn(async move {
+                match fs
+                    .read_file_in(&path, FileSystemPath::OfType(FileSystemType::ReadWrite))
+                    .await
+                {
+                    Ok(pem) => {
+                        network::network::utils::certified_keys_from_pem(std::str::from_utf8(&pem)?)
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                        if let Some(parent) = path
+                            .parent()
+                            .filter(|parent| !parent.as_os_str().is_empty())
+                        {
+                            fs.create_dir(parent).await?;
+                        }
+                        let cert_and_private_key =
+                            network::network::utils::create_certifified_keys();
+                        let pem = cert_and_private_key
+                            .1
+                            .to_pkcs8_pem(x509_cert::der::pem::LineEnding::LF)?;
+                        fs.write_file(&path, pem.as_bytes().to_vec()).await?;
+                        Ok(cert_and_private_key)
+                    }
+                    Err(err) => Err(err.into()),
+                }
+            }))
+        } else {
+            Either::Left(network::network::utils::create_certifified_keys())
+        };
+
+        let trusted_proxies = (!config_game.sv.trusted_proxy_hashes_file.is_empty()).then(|| {
+            let path = PathBuf::from(&config_game.sv.trusted_proxy_hashes_file);
+            let fs = io.fs.clone();
+            io.rt.spawn(async move {
+                let contents = fs
+                    .read_file_in(&path, FileSystemPath::OfType(FileSystemType::ReadWrite))
+                    .await?;
+                network::network::proxy::TrustedProxies::from_hash_list(std::str::from_utf8(
+                    &contents,
+                )?)
+            })
+        });
+
         let config_db = config_game.sv.db.clone();
         let accounts_enabled = !config_db.enable_accounts.is_empty();
         let task = Self::db_setup_task(&io.rt, config_db);
@@ -756,12 +816,26 @@ impl Server {
             packet_plugins.push(Arc::new(DefaultNetworkPacketCompressor::new()));
         }
 
+        let cert_and_private_key = match cert_and_private_key {
+            Either::Left(cert) => cert,
+            Either::Right(task) => task.get()?,
+        };
         let cert_sha256_fingerprint = cert_and_private_key
             .0
             .tbs_certificate
             .subject_public_key_info
             .fingerprint_bytes()?;
 
+        log::info!(
+            "server public-key hash: {}",
+            base::hash::fmt_hash(&cert_sha256_fingerprint)
+        );
+        let trusted_proxies = match trusted_proxies {
+            Some(task) => task.get()?,
+            None => network::network::proxy::TrustedProxies::default(),
+        };
+        let last_register_info =
+            Arc::new(arc_swap::ArcSwap::from_pointee(ServerBrowserInfo::default()));
         let (network_server, _cert, sock_addrs, _notifer_server) = Networks::init_server(
             config_game.sv.bind_addr_v4.parse()?,
             config_game.sv.bind_addr_v6.parse()?,
@@ -769,11 +843,12 @@ impl Server {
             port_v6,
             game_event_generator_server.clone(),
             NetworkServerCertMode::FromCertAndPrivateKey(Box::new(NetworkServerCertAndKey {
-                cert: cert_and_private_key.0,
-                private_key: cert_and_private_key.1,
+                cert: cert_and_private_key.0.clone(),
+                private_key: cert_and_private_key.1.clone(),
             })),
             &time,
             NetworkServerInitOptions::new()
+                .with_trusted_proxies(trusted_proxies.clone())
                 .with_max_thread_count(if shared_info.is_internal_server { 2 } else { 6 })
                 .with_disable_retry_on_connect(
                     config_engine.net.disable_retry_on_connect || shared_info.is_internal_server,
@@ -795,6 +870,34 @@ impl Server {
                 connection_plugins: Arc::new(connection_plugins),
             },
         )?;
+
+        let s2s = if trusted_proxies.public_key_hashes.is_empty() {
+            None
+        } else {
+            let addresses = [
+                SocketAddr::new(
+                    config_game.sv.bind_addr_v4.parse()?,
+                    config_game.sv.s2s_port_v4,
+                ),
+                SocketAddr::new(
+                    config_game.sv.bind_addr_v6.parse()?,
+                    config_game.sv.s2s_port_v6,
+                ),
+            ];
+            crate::s2s::Server::new(
+                &addresses,
+                &cert_and_private_key.0,
+                &cert_and_private_key.1,
+                trusted_proxies.clone(),
+                crate::s2s::router(
+                    last_register_info.clone(),
+                    crate::s2s::Ports {
+                        game_v4: sock_addrs[0].port(),
+                        game_v6: sock_addrs[1].port(),
+                    },
+                ),
+            )?
+        };
 
         let (db, game_db, accounts) = task.get()?;
 
@@ -935,12 +1038,16 @@ impl Server {
                 } else {
                     None
                 },
+                config_game.sv.resource_server_url.is_empty(),
             )?,
 
             last_tick_time: time.now(),
+            master_servers: Arc::new(master_servers.get()?),
             last_register_time: None,
             register_task: None,
             last_register_serial: 0,
+            _s2s: s2s,
+            last_register_info,
 
             last_network_stats_time: time.now(),
 
@@ -1036,6 +1143,7 @@ impl Server {
                 game_mod: self.game_server.game_mod.clone(),
                 render_mod: self.game_server.render_mod.clone(),
                 mod_config: self.game_server.game.info.config.clone(),
+
                 resource_server_fallback: self.game_server.http_server.as_ref().map(|server| {
                     match ip {
                         IpAddr::V4(_) => server.port_v4,
@@ -2837,10 +2945,7 @@ impl Server {
     }
 
     pub fn register(&mut self) {
-        let master_servers = [
-            //"https://master1.ddnet.org/ddnet/15/register",
-            "https://pg.ddnet.org:4444/ddnet/15/register",
-        ];
+        let master_servers = self.master_servers.clone();
 
         let http_v4 = self.io.http.clone();
         let http_v6 = self.http_v6.clone();
@@ -2851,6 +2956,7 @@ impl Server {
 
         let settings = self.game_server.game.settings();
         let mut register_info = ServerBrowserInfo {
+            resource_server_url: self.config_game.sv.resource_server_url.parse().ok(),
             name: self.config_game.sv.name.as_str().try_into().unwrap(),
             game_type: self.game_server.game.info.mod_name.clone(),
             version: self.game_server.game.info.version.clone(),
@@ -2895,10 +3001,10 @@ impl Server {
             *browser_info = Some(register_info.clone())
         }
 
-        let register_info = loop {
+        let (register_info, browser_info) = loop {
             let json = serde_json::to_string(&register_info).unwrap();
             if json.len() <= 16 * 1024 {
-                break json;
+                break (json, register_info);
             } else {
                 // make sure no endless loop exists
                 // in worst case don't register at all.
@@ -2911,6 +3017,8 @@ impl Server {
                     .truncate(register_info.players.len() / 2);
             }
         };
+
+        self.last_register_info.store(Arc::new(browser_info));
 
         if !self.config_game.sv.register {
             return;
@@ -2927,6 +3035,7 @@ impl Server {
                     rand::rng().fill_bytes(&mut secret);
                     let mut challenge_secret: [u8; 32] = Default::default();
                     rand::rng().fill_bytes(&mut challenge_secret);
+                    let master_servers = master_servers.as_slice();
                     let register = |register_info: String,
                                     http: Arc<dyn HttpClientInterface>,
                                     ipv4: bool,
@@ -2950,7 +3059,7 @@ impl Server {
                                 ];
                                 match http
                                     .custom_request(
-                                        master_server.try_into().unwrap(),
+                                        master_server.join("register")?,
                                         headers,
                                         Some(register_info.as_bytes().to_vec()),
                                     )
@@ -3621,6 +3730,7 @@ impl Server {
             } else {
                 None
             },
+            self.config_game.sv.resource_server_url.is_empty(),
         )?;
         if let Some(snapshot) = snapshot {
             self.game_server
@@ -3650,6 +3760,7 @@ impl Server {
                     game_mod: self.game_server.game_mod.clone(),
                     render_mod: self.game_server.render_mod.clone(),
                     hint_start_camera_pos: self.game_server.game.get_client_camera_join_pos(),
+
                     resource_server_fallback: self.game_server.http_server.as_ref().map(|server| {
                         match client.ip {
                             IpAddr::V4(_) => server.port_v4,
@@ -3710,7 +3821,7 @@ pub fn load_config() -> (Io, ConfigEngine, ConfigGame) {
 
 pub fn ddnet_server_main<const IS_INTERNAL_SERVER: bool>(
     time: SteadyClock,
-    cert_and_private_key: (x509_cert::Certificate, SigningKey),
+    forced_cert_and_private_key: Option<(x509_cert::Certificate, SigningKey)>,
     is_open: Arc<AtomicBool>,
     shared_info: Arc<LocalServerInfo>,
     args: Vec<String>,
@@ -3768,7 +3879,7 @@ pub fn ddnet_server_main<const IS_INTERNAL_SERVER: bool>(
     let mut server = Server::new(
         time,
         is_open,
-        cert_and_private_key,
+        forced_cert_and_private_key,
         shared_info,
         if IS_INTERNAL_SERVER {
             config_game.sv.port_internal

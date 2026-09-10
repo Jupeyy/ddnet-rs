@@ -134,8 +134,7 @@ fn render_ui_prepared(
             // create new texture
             None => {
                 assert!(delta.pos.is_none(), "can this happen?");
-                let tex_index;
-                match &delta.image {
+                let tex_index = match &delta.image {
                     ImageData::Color(img) => {
                         let mut pixels =
                             backend_handle.mem_alloc(GraphicsMemoryAllocationType::TextureRgbaU8 {
@@ -150,8 +149,7 @@ fn render_ui_prepared(
                             .for_each(|(index, pixel)| {
                                 *pixel = img.pixels[index / 4].to_array()[index % 4];
                             });
-                        tex_index =
-                            Some(texture_handle.load_texture_rgba_u8(pixels, "ui").unwrap());
+                        Some(texture_handle.load_texture_rgba_u8(pixels, "ui").unwrap())
                     } /*ImageData::Font(img_font) => {
                           let mut pixels_mem =
                               backend_handle.mem_alloc(GraphicsMemoryAllocationType::TextureRgbaU8 {
@@ -176,7 +174,7 @@ fn render_ui_prepared(
                                   .unwrap(),
                           );
                       }*/
-                }
+                };
                 if let Some(tex) = tex_index {
                     textures.insert(*texture_id, tex);
                 }

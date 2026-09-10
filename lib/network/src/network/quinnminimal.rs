@@ -110,13 +110,13 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 
 /// hash certificate handler
 #[derive(Debug)]
-struct CertHashServerVerification {
+pub struct CertHashServerVerification {
     hash: Hash,
     provider: Arc<rustls::crypto::CryptoProvider>,
 }
 
 impl CertHashServerVerification {
-    fn new(provider: Arc<rustls::crypto::CryptoProvider>, hash: Hash) -> Arc<Self> {
+    pub fn new(provider: Arc<rustls::crypto::CryptoProvider>, hash: Hash) -> Arc<Self> {
         Arc::new(Self { hash, provider })
     }
 }
@@ -190,7 +190,7 @@ impl rustls::client::danger::ServerCertVerifier for CertHashServerVerification {
 /// ## Args
 ///
 /// - server_certs: a list of trusted certificates in DER format.
-fn configure_client(options: &NetworkClientInitOptions) -> anyhow::Result<ClientConfig> {
+pub fn configure_client(options: &NetworkClientInitOptions) -> anyhow::Result<ClientConfig> {
     let mut transport_config = TransportConfig::default();
     transport_config
         .max_concurrent_bidi_streams(NUM_BIDI_STREAMS.into())
@@ -364,12 +364,17 @@ fn configure_server(
     };
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut server_config = ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(
-        rustls::ServerConfig::builder_with_provider(provider.clone())
-            .with_safe_default_protocol_versions()?
-            .with_client_cert_verifier(Arc::new(ServerClientCertVerifier(provider.clone())))
-            .with_single_cert(cert_chain, priv_key)?,
-    )?));
+    let mut tls_config = rustls::ServerConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()?
+        .with_client_cert_verifier(Arc::new(ServerClientCertVerifier(provider.clone())))
+        .with_single_cert(cert_chain, priv_key)?;
+    if !options.trusted_proxies.public_key_hashes.is_empty() {
+        // Forwarding metadata belongs to this handshake, never a resumed session.
+        tls_config.send_tls13_tickets = 0;
+        tls_config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    }
+    let mut server_config =
+        ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls_config)?));
     // For now disable migration. Before enabling it think about ip bans
     // since those would be affected most by this. Maybe account-only
     // servers could allow it or similar.

@@ -154,6 +154,7 @@ impl IngameMenu {
         for i in 0..100 {
             servers.push(ServerBrowserServer {
                 info: ServerBrowserInfo {
+                    resource_server_url: None,
                     name: format!("demo_server {i}").as_str().try_into().unwrap(),
                     game_type: format!("demo_server {i}").as_str().try_into().unwrap(),
                     version: format!("demo_version {i}").as_str().try_into().unwrap(),

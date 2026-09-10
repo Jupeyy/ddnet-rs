@@ -450,9 +450,7 @@ pub fn config_default(_attr: TokenStream, tokens: TokenStream) -> TokenStream {
 
     let mut extra_modules: Vec<proc_macro2::TokenStream> = Vec::new();
 
-    let default_impl: proc_macro2::TokenStream;
-
-    match &mut base {
+    let default_impl = match &mut base {
         Item::Struct(s) => {
             let struct_name = &s.ident;
 
@@ -661,7 +659,7 @@ pub fn config_default(_attr: TokenStream, tokens: TokenStream) -> TokenStream {
                     .push(parse_quote!(#[serde(default = #mod_ident_def)]));
             }
 
-            default_impl = quote! {
+            quote! {
                 impl Default for #struct_name {
                     fn default() -> Self {
                         Self {
@@ -669,10 +667,10 @@ pub fn config_default(_attr: TokenStream, tokens: TokenStream) -> TokenStream {
                         }
                     }
                 }
-            };
+            }
         }
         _ => panic!("this macro can only be applied to structs"),
-    }
+    };
 
     let mut res = base.to_token_stream();
 

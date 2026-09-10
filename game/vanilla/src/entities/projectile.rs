@@ -142,23 +142,11 @@ pub mod projectile {
         ) {
             let tuning = collision.get_tune_at(&core.pos);
 
-            let curvature;
-            let speed;
-
-            match core.ty {
-                WeaponWithProjectile::Grenade => {
-                    curvature = tuning.grenade_curvature;
-                    speed = tuning.grenade_speed;
-                }
-                WeaponWithProjectile::Shotgun => {
-                    curvature = tuning.shotgun_curvature;
-                    speed = tuning.shotgun_speed;
-                }
-                WeaponWithProjectile::Gun => {
-                    curvature = tuning.gun_curvature;
-                    speed = tuning.gun_speed;
-                }
-            }
+            let (curvature, speed) = match core.ty {
+                WeaponWithProjectile::Grenade => (tuning.grenade_curvature, tuning.grenade_speed),
+                WeaponWithProjectile::Shotgun => (tuning.shotgun_curvature, tuning.shotgun_speed),
+                WeaponWithProjectile::Gun => (tuning.gun_curvature, tuning.gun_speed),
+            };
 
             calc_pos_and_vel(pos, &mut core.vel, curvature, speed, time)
         }

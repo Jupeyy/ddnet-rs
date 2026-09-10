@@ -153,6 +153,8 @@ impl NetworkSharedInitOptions {
 
 #[derive(Debug, Default, Clone)]
 pub struct NetworkServerInitOptions {
+    /// Trusted terminating QUIC proxies. Empty by default.
+    pub trusted_proxies: super::proxy::TrustedProxies,
     pub base: NetworkSharedInitOptions,
     pub max_thread_count: Option<usize>,
     /// disallow QUICs 0.5-RTT fast connection
@@ -168,6 +170,11 @@ pub struct NetworkServerInitOptions {
 }
 
 impl NetworkServerInitOptions {
+    pub fn with_trusted_proxies(mut self, proxies: super::proxy::TrustedProxies) -> Self {
+        self.trusted_proxies = proxies;
+        self
+    }
+
     pub fn new() -> Self {
         Default::default()
     }

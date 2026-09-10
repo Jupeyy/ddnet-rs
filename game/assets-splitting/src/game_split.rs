@@ -18,7 +18,9 @@ impl Game06Part {
 
     fn if_not_fully_transparent(self) -> Option<Self> {
         self.data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixels| pixels[3] != 0)
             .then_some(self)
     }

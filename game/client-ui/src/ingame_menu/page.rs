@@ -56,6 +56,7 @@ impl IngameMenuUi {
         console_entries: Vec<ConsoleEntry>,
         raw_input_info: RawInputInfo,
         browser_data: ServerBrowserData,
+        master_servers: Arc<Vec<url::Url>>,
         features: EnabledFeatures,
         server_players: ServerPlayers,
         game_server_info: GameServerInfo,
@@ -80,6 +81,7 @@ impl IngameMenuUi {
             console_entries,
             raw_input_info,
             browser_data,
+            master_servers,
             features,
             ddnet_info_req,
         );

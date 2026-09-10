@@ -152,11 +152,13 @@ members = [
   "src/emoticon-convert",
   "src/extra-convert",
   "src/game-convert",
+  "src/assets-download-server",
   "src/hud-convert",
   "src/map-convert",
   "src/master-server",
   "src/part-convert",
   "src/server",
+  "src/reverse-proxy",
   "src/skin-convert",
 ]
 

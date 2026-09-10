@@ -72,6 +72,30 @@ pub struct GameConnect {
     pub log: ConnectingLog,
     pub server_cert: ServerCertMode,
     pub browser_data: ServerBrowserData,
+    pub master_servers: Arc<Vec<url::Url>>,
+}
+
+impl GameConnect {
+    pub fn resource_download_url(&self, fallback_port: Option<u16>) -> Option<url::Url> {
+        self.browser_data
+            .list()
+            .find(self.addr)
+            .and_then(|server| server.info.resource_server_url.clone())
+            .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+            .map(|mut url| {
+                if !url.path().ends_with('/') {
+                    url.set_path(&format!("{}/", url.path()));
+                }
+                url
+            })
+            .or_else(|| {
+                fallback_port.map(|port| {
+                    format!("http://{}/", SocketAddr::new(self.addr.ip(), port))
+                        .parse()
+                        .unwrap()
+                })
+            })
+    }
 }
 
 pub struct GameNetwork {

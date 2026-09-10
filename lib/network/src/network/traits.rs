@@ -97,7 +97,9 @@ pub trait NetworkConnectionInterface: Clone + Send + Sync + 'static {
         on_data: F,
     ) -> anyhow::Result<()>;
 
+    /// Effective client address, resolved through a trusted proxy when configured.
     fn remote_addr(&self) -> SocketAddr;
+    /// Effective client certificate. A terminating trusted proxy vouches for key possession.
     fn peer_identity(&self) -> x509_cert::Certificate;
     fn stats(&self) -> ConnectionStats;
 }

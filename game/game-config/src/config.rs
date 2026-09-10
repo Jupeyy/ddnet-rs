@@ -591,6 +591,22 @@ pub const MAX_SERVER_NAME_LEN: usize = 64;
 #[config_default]
 #[derive(Debug, Clone, Serialize, Deserialize, ConfigInterface)]
 pub struct ConfigServer {
+    /// Optional Ed25519 PKCS#8 PEM private-key file for standalone servers.
+    /// Path within the server filesystem; created in writable storage.
+    /// Created if absent. Empty uses a fresh key on every startup.
+    #[default = ""]
+    pub private_key_file: String,
+
+    /// Proxy hash list in writable storage, loaded at startup. Empty disables proxy trust.
+    #[default = ""]
+    pub trusted_proxy_hashes_file: String,
+
+    /// HTTPS control ports, bound on the game bind addresses only when proxies are trusted.
+    #[default = 8315]
+    pub s2s_port_v4: u16,
+    #[default = 8316]
+    pub s2s_port_v6: u16,
+
     #[conf_valid(length(max = MAX_SERVER_NAME_LEN))]
     #[default = "unnamed server"]
     pub name: String,
@@ -605,6 +621,9 @@ pub struct ConfigServer {
     pub port_v4: u16,
     #[default = 8311]
     pub port_v6: u16,
+    /// External HTTP(S) assets base URL. Empty starts the built-in download server.
+    #[default = ""]
+    pub resource_server_url: String,
     /// The ipv4 port to use for the resource download server
     #[default = 0]
     pub download_server_port_v4: u16,

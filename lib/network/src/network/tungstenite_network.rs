@@ -364,8 +364,12 @@ impl
     fn make_server_endpoint(
         bind_addr: std::net::SocketAddr,
         _cert_mode: NetworkServerCertMode,
-        _options: &NetworkServerInitOptions,
+        options: &NetworkServerInitOptions,
     ) -> anyhow::Result<(Self, NetworkServerCertModeResult)> {
+        anyhow::ensure!(
+            options.trusted_proxies.public_key_hashes.is_empty(),
+            "trusted proxy forwarding is only supported by QUIC"
+        );
         let (endpoint, (cert, _)) = (
             TcpListener::bind(&bind_addr).block_on()?,
             create_certifified_keys(),

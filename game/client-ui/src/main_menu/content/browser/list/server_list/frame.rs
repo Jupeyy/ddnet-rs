@@ -89,6 +89,7 @@ pub fn render(mut body: TableBody<'_>, pipe: &mut UiRenderPipe<UserData>, cur_pa
         server: ServerBrowserServer {
             info: {
                 let mut info = server_browser_info.unwrap_or_else(|| ServerBrowserInfo {
+                    resource_server_url: None,
                     name: Default::default(),
                     version: Default::default(),
                     game_type: Default::default(),

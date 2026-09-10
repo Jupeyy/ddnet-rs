@@ -13,7 +13,6 @@ bundled_data_dir = ["base-fs/bundled_data_dir"]
 [dependencies]
 base = { path = "../../lib/base" }
 base-fs = { path = "../../lib/base-fs", default-features = false }
-network = { path = "../../lib/network" }
 
 env_logger = "0.11"
 game-base = { path = "../../game/game-base" }

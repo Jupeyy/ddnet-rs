@@ -3,7 +3,6 @@ use std::sync::{Arc, atomic::AtomicBool};
 use base::steady_clock::SteadyClock;
 use game_base::local_server_info::LocalServerInfo;
 use game_server::server::ddnet_server_main;
-use network::network::utils::create_certifified_keys;
 
 fn main() {
     let time = SteadyClock::start();
@@ -18,8 +17,6 @@ fn main() {
         args.remove(0);
     }
 
-    let cert = create_certifified_keys();
-
     let server_is_open = Arc::new(AtomicBool::new(true));
     let server_is_open_clone = server_is_open.clone();
 
@@ -28,7 +25,7 @@ fn main() {
     let shared_info = Arc::new(LocalServerInfo::new(false));
     ddnet_server_main::<false>(
         time_clone,
-        cert,
+        None,
         server_is_open_clone,
         shared_info,
         args,

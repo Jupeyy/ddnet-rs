@@ -129,6 +129,7 @@ impl MainMenu {
         for i in 0..100 {
             servers.push(ServerBrowserServer {
                 info: ServerBrowserInfo {
+                    resource_server_url: None,
                     name: format!("demo_server {i}").as_str().try_into().unwrap(),
                     game_type: format!("demo_server {i}").as_str().try_into().unwrap(),
                     version: format!("demo_version {i}").as_str().try_into().unwrap(),
@@ -166,6 +167,7 @@ impl MainMenu {
         }
         servers.push(ServerBrowserServer {
             info: ServerBrowserInfo {
+                resource_server_url: None,
                 name: "0123456789012345678901234567890123456789"
                     .try_into()
                     .unwrap(),
@@ -203,7 +205,8 @@ impl MainMenu {
             legacy_server: true,
         });
 
-        let servers_task = MainMenuUi::req_server_list(&io);
+        let servers_task =
+            MainMenuUi::req_server_list(&io, Arc::new(game_base::server_list_urls::defaults()));
 
         let mut demos: DemoList = Default::default();
         demos.push(DemoListEntry::Directory {

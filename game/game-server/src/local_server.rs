@@ -34,7 +34,7 @@ pub fn start_local_server(
         .spawn(move || {
             ddnet_server_main::<true>(
                 time_clone,
-                (cert, private_key),
+                Some((cert, private_key)),
                 server_is_open_clone,
                 shared_info_thread,
                 Default::default(),

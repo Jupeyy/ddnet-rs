@@ -13,6 +13,7 @@ pub mod notifier;
 pub mod packet_compressor;
 pub mod packet_dict;
 pub mod plugins;
+pub mod proxy;
 pub mod quinn_network;
 pub mod quinnminimal;
 pub mod traits;

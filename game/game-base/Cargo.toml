@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+base-io-traits = { path = "../../lib/base-io-traits" }
 base = { path = "../../lib/base" }
 command-parser = { path = "../../lib/command-parser" }
 config = { path = "../../lib/config" }
-hiarc = { path = "../../lib/hiarc", features = ["enable_time"] }
+hiarc = { path = "../../lib/hiarc", features = ["enable_time", "enable_url"] }
 math = { path = "../../lib/math" }
 pool = { path = "../../lib/pool" }
 
@@ -20,10 +21,12 @@ hashlink = { git = "https://github.com/Jupeyy/hashlink/", branch = "ddnet", feat
   "serde_impl",
 ] }
 indexmap = "2"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 thiserror = "2"
 time = { version = "0.3", features = ["serde"] }
+url = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
 rustc-hash = "2"
