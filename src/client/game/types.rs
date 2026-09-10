@@ -72,6 +72,7 @@ pub struct GameConnect {
     pub log: ConnectingLog,
     pub server_cert: ServerCertMode,
     pub browser_data: ServerBrowserData,
+    pub master_servers: Arc<Vec<url::Url>>,
 }
 
 impl GameConnect {
@@ -79,13 +80,7 @@ impl GameConnect {
         self.browser_data
             .list()
             .find(self.addr)
-            .and_then(|server| {
-                server
-                    .info
-                    .resource_server_url
-                    .as_ref()
-                    .and_then(|value| value.parse::<url::Url>().ok())
-            })
+            .and_then(|server| server.info.resource_server_url.clone())
             .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
             .map(|mut url| {
                 if !url.path().ends_with('/') {

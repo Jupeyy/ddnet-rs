@@ -95,7 +95,7 @@ pub struct ServerBrowserInfoMap {
 pub struct ServerBrowserInfo {
     /// External HTTP(S) base URL for this server's maps and resources.
     #[serde(default)]
-    pub resource_server_url: Option<String>,
+    pub resource_server_url: Option<url::Url>,
     #[serde(default)]
     #[serde_as(deserialize_as = "DefaultOnError")]
     pub name: NetworkString<MAX_SERVER_NAME_LEN>,

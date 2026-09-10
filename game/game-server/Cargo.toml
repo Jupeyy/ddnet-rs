@@ -64,6 +64,7 @@ tokio = { version = "1", features = ["net", "rt", "macros", "time"] }
 tracing = { version = "0.1", default-features = false, features = [
   "attributes",
 ] }
+url = "2"
 x509-cert = { version = "0.2" }
 
 [dev-dependencies]

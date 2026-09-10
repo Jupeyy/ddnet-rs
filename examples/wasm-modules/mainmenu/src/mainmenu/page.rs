@@ -205,7 +205,8 @@ impl MainMenu {
             legacy_server: true,
         });
 
-        let servers_task = MainMenuUi::req_server_list(&io);
+        let servers_task =
+            MainMenuUi::req_server_list(&io, Arc::new(game_base::server_list_urls::defaults()));
 
         let mut demos: DemoList = Default::default();
         demos.push(DemoListEntry::Directory {

@@ -144,6 +144,7 @@ impl Game {
         let server_cert = connect.server_cert.clone();
         let http = io.http.clone();
         let addr = connect.addr;
+        let master_servers = connect.master_servers.clone();
         let server_cert_verify_task = io.rt.spawn(async move {
             // if list didn't refresh for over an hour, do it now
             let outdated = servers.time.is_none_or(|server_time| {
@@ -164,7 +165,7 @@ impl Game {
                     Err(anyhow!("Server was not found in the server list"))
                 }
             } else if should_check {
-                let servers = MainMenuUi::download_server_list(&http).await?;
+                let servers = MainMenuUi::download_server_list(&http, &master_servers).await?;
                 let server = servers
                     .iter()
                     .find(|server| server.addresses.contains(&addr))

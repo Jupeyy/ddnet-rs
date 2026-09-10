@@ -11,8 +11,6 @@ use x509_cert::der::Encode;
 
 use crate::config::{Config, parse_hash};
 
-const MASTER: &str = "https://pg.ddnet.org:4444/ddnet/15/register";
-
 fn client(config: &Config) -> anyhow::Result<reqwest::Client> {
     let (cert, key) = config.identity()?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -101,7 +99,11 @@ async fn register(
     }
 }
 
-pub async fn run(config: &Config, initial: &ServerInfo) -> anyhow::Result<()> {
+pub async fn run(
+    config: &Config,
+    initial: &ServerInfo,
+    masters: &[url::Url],
+) -> anyhow::Result<()> {
     let s2s = client(config)?;
     let url = format!("https://{}/server-info", config.backend_s2s);
     let hash = config.hash()?;
@@ -132,31 +134,35 @@ pub async fn run(config: &Config, initial: &ServerInfo) -> anyhow::Result<()> {
                 info.browser_info.cert_sha256_fingerprint = hash;
                 let info = serde_json::to_string(&info.browser_info)?;
                 serial += 1;
-                let (a, b) = tokio::join!(
-                    register(
-                        &v4,
-                        MASTER,
-                        &info,
-                        config.listen_game_v4.port(),
-                        &secret,
-                        &challenge,
-                        serial
-                    ),
-                    register(
-                        &v6,
-                        MASTER,
-                        &info,
-                        config.listen_game_v6.port(),
-                        &secret,
-                        &challenge,
-                        serial
-                    ),
-                );
-                for (family, result) in [("IPv4", a), ("IPv6", b)] {
-                    if let Err(err) = result {
-                        eprintln!("proxy browser registration {family}: {err}");
+                let register_family = |client, port, family| {
+                    let info = &info;
+                    let secret = &secret;
+                    let challenge = &challenge;
+                    async move {
+                        for master in masters {
+                            let master = master.join("register")?;
+                            match register(
+                                client,
+                                master.as_str(),
+                                info,
+                                port,
+                                secret,
+                                challenge,
+                                serial,
+                            )
+                            .await
+                            {
+                                Ok(()) => break,
+                                Err(err) => eprintln!("proxy browser registration {family}: {err}"),
+                            }
+                        }
+                        Ok::<_, anyhow::Error>(())
                     }
-                }
+                };
+                tokio::try_join!(
+                    register_family(&v4, config.listen_game_v4.port(), "IPv4"),
+                    register_family(&v6, config.listen_game_v6.port(), "IPv6"),
+                )?;
             }
             Err(err) => eprintln!("proxy S2S unavailable, skipping registration: {err}"),
         }

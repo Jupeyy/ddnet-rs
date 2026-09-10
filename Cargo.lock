@@ -4562,6 +4562,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base",
+ "base-io-traits",
  "command-parser",
  "config",
  "game-config",
@@ -4569,6 +4570,7 @@ dependencies = [
  "hashlink 0.10.0",
  "hiarc",
  "indexmap 2.14.0",
+ "log 0.4.33",
  "math",
  "pool",
  "rustc-hash 2.1.3",
@@ -4576,6 +4578,7 @@ dependencies = [
  "serde_with",
  "thiserror 2.0.19",
  "time",
+ "url",
 ]
 
 [[package]]
@@ -4742,6 +4745,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
+ "url",
  "vanilla",
  "x509-cert",
 ]
@@ -9098,6 +9102,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
  "x509-cert",
 ]
 

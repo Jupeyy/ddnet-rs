@@ -186,7 +186,7 @@ fn make_frontends(config: &Config) -> anyhow::Result<(Endpoint, Endpoint)> {
     Ok((v4, v6))
 }
 
-pub async fn run(config: Config) -> anyhow::Result<()> {
+pub async fn run(config: Config, masters: Vec<url::Url>) -> anyhow::Result<()> {
     ensure!(
         config.max_connections > 0,
         "max_connections must be positive"
@@ -220,7 +220,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         backend_game
     );
     let config = Arc::new(config);
-    let s2s = crate::s2s::run(&config, &info);
+    let s2s = crate::s2s::run(&config, &info, &masters);
     tokio::pin!(s2s);
     let mut connections = JoinSet::new();
     let interrupt = tokio::signal::ctrl_c();

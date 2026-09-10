@@ -85,7 +85,13 @@ fn main() -> anyhow::Result<()> {
                     )
                 );
             }
-            Command::Run => relay::run(config::Config::load(&fs, &args.config_dir).await?).await?,
+            Command::Run => {
+                relay::run(
+                    config::Config::load(&fs, &args.config_dir).await?,
+                    game_base::server_list_urls::load(&fs).await,
+                )
+                .await?
+            }
             Command::Export => println!(
                 "{}",
                 base::hash::fmt_hash(&config::Config::load(&fs, &args.config_dir).await?.hash()?)

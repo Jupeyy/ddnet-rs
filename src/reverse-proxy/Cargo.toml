@@ -37,6 +37,7 @@ tokio = { version = "1", features = [
   "time",
 ] }
 x509-cert = "0.2"
+url = "2"
 
 [dev-dependencies]
 arc-swap = "1"

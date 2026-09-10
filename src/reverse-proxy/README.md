@@ -21,3 +21,7 @@ reverse-proxy import <proxy-hash>
 
 Backend game ports are discovered over S2S at startup. Restart the proxy if those ports change.
 Set the backend’s `sv.resource_server_url` to an external assets server (e.g. `assets-download-server`). Clients download directly using the URL in browser info; the proxy forwards no HTTP traffic.
+
+Master URLs: optional `server_list_urls.cfg` in the shared config directory, one
+HTTPS base URL per line (e.g. `https://localhost:4444/ddnet/15/`).
+Client, server and proxy use it; a missing file uses the default master.

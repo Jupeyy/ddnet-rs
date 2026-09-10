@@ -206,6 +206,7 @@ pub struct Server {
     time: SteadyClock,
 
     last_tick_time: Duration,
+    master_servers: Arc<Vec<url::Url>>,
     last_register_time: Option<Duration>,
     register_task: Option<IoRuntimeTask<()>>,
     last_register_serial: u32,
@@ -658,6 +659,12 @@ impl Server {
         cache: ParserCache,
         raw_rcon_input: &[String],
     ) -> anyhow::Result<Self> {
+        let master_servers = {
+            let fs = io.fs.clone();
+            io.rt
+                .spawn(async move { Ok(game_base::server_list_urls::load(fs.as_ref()).await) })
+        };
+
         let cert_and_private_key = if let Some(cert) = forced_cert_and_private_key {
             Either::Left(cert)
         } else if !config_game.sv.private_key_file.is_empty() {
@@ -1035,6 +1042,7 @@ impl Server {
             )?,
 
             last_tick_time: time.now(),
+            master_servers: Arc::new(master_servers.get()?),
             last_register_time: None,
             register_task: None,
             last_register_serial: 0,
@@ -2937,10 +2945,7 @@ impl Server {
     }
 
     pub fn register(&mut self) {
-        let master_servers = [
-            //"https://master1.ddnet.org/ddnet/15/register",
-            "https://pg.ddnet.org:4444/ddnet/15/register",
-        ];
+        let master_servers = self.master_servers.clone();
 
         let http_v4 = self.io.http.clone();
         let http_v6 = self.http_v6.clone();
@@ -2951,8 +2956,7 @@ impl Server {
 
         let settings = self.game_server.game.settings();
         let mut register_info = ServerBrowserInfo {
-            resource_server_url: (!self.config_game.sv.resource_server_url.is_empty())
-                .then(|| self.config_game.sv.resource_server_url.clone()),
+            resource_server_url: self.config_game.sv.resource_server_url.parse().ok(),
             name: self.config_game.sv.name.as_str().try_into().unwrap(),
             game_type: self.game_server.game.info.mod_name.clone(),
             version: self.game_server.game.info.version.clone(),
@@ -3031,6 +3035,7 @@ impl Server {
                     rand::rng().fill_bytes(&mut secret);
                     let mut challenge_secret: [u8; 32] = Default::default();
                     rand::rng().fill_bytes(&mut challenge_secret);
+                    let master_servers = master_servers.as_slice();
                     let register = |register_info: String,
                                     http: Arc<dyn HttpClientInterface>,
                                     ipv4: bool,
@@ -3054,7 +3059,7 @@ impl Server {
                                 ];
                                 match http
                                     .custom_request(
-                                        master_server.try_into().unwrap(),
+                                        master_server.join("register")?,
                                         headers,
                                         Some(register_info.as_bytes().to_vec()),
                                     )

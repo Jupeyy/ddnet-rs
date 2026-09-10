@@ -372,6 +372,7 @@ struct ClientNativeImpl {
     player_settings_sync: PlayerSettingsSync,
     raw_input_info: RawInputInfo,
     browser_data: ServerBrowserData,
+    master_servers: Arc<Vec<url::Url>>,
 
     scene: SceneObject,
 
@@ -2203,6 +2204,7 @@ impl ClientNativeImpl {
                 log: self.connecting_log.clone(),
                 server_cert,
                 browser_data: self.browser_data.clone(),
+                master_servers: self.master_servers.clone(),
             },
             &self.accounts,
             DisconnectAutoCleanup {
@@ -2611,6 +2613,11 @@ impl FromNativeLoadingImpl<ClientNativeLoadingImpl> for GraphicsApp<ClientNative
 
         let benchmark = Benchmark::new(loading.config_engine.dbg.bench);
         let io = Io::from(loading.io, Arc::new(HttpClient::new()));
+        let master_servers = {
+            let fs = io.fs.clone();
+            io.rt
+                .spawn(async move { Ok(game_base::server_list_urls::load(fs.as_ref()).await) })
+        };
         benchmark.bench("upgrading io with http client");
 
         let font_loading = UiFontDataLoading::new(&io.clone().into());
@@ -2871,6 +2878,7 @@ impl FromNativeLoadingImpl<ClientNativeLoadingImpl> for GraphicsApp<ClientNative
 
         let ddnet_info_proxy = ddnet_info_proxy::spawn(&io)?;
 
+        let master_servers = Arc::new(master_servers.get()?);
         let main_menu = Box::new(MainMenuUi::new(
             &graphics,
             &sound,
@@ -2887,6 +2895,7 @@ impl FromNativeLoadingImpl<ClientNativeLoadingImpl> for GraphicsApp<ClientNative
             local_console.entries.clone(),
             raw_input_info.clone(),
             browser_data.clone(),
+            master_servers.clone(),
             enabled_features,
             ddnet_info_proxy.state.clone(),
         ));
@@ -2908,6 +2917,7 @@ impl FromNativeLoadingImpl<ClientNativeLoadingImpl> for GraphicsApp<ClientNative
             local_console.entries.clone(),
             raw_input_info.clone(),
             browser_data.clone(),
+            master_servers.clone(),
             enabled_features,
             server_players.clone(),
             game_server_info.clone(),
@@ -3044,6 +3054,7 @@ impl FromNativeLoadingImpl<ClientNativeLoadingImpl> for GraphicsApp<ClientNative
             raw_input_info,
             spatial_chat: spatial_chat::SpatialChat::new(spatial_chat),
             browser_data,
+            master_servers,
 
             scene,
 
