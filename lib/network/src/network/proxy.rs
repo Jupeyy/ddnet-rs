@@ -60,6 +60,22 @@ pub fn create_proxy_certificate(
 }
 
 impl TrustedProxies {
+    /// Parse one SHA-256 SPKI fingerprint (64 hex digits) per line.
+    /// Empty lines and lines beginning with `#` are ignored; duplicates are collapsed.
+    pub fn from_hash_list(contents: &str) -> anyhow::Result<Self> {
+        let mut proxies = Self::default();
+        for (index, line) in contents.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let hash = base::hash::decode_hash(line)
+                .ok_or_else(|| anyhow::anyhow!("invalid proxy hash on line {}", index + 1))?;
+            proxies.public_key_hashes.insert(hash);
+        }
+        Ok(proxies)
+    }
+
     /// Call only after TLS has authenticated possession of the peer's private key.
     pub(crate) fn resolve(&self, peer: &Certificate) -> anyhow::Result<Option<ForwardedIdentity>> {
         let oid = spki::ObjectIdentifier::new("2.25.247823191")?;

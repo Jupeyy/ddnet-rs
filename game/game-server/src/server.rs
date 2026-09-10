@@ -209,6 +209,8 @@ pub struct Server {
     last_register_time: Option<Duration>,
     register_task: Option<IoRuntimeTask<()>>,
     last_register_serial: u32,
+    last_register_info: Arc<arc_swap::ArcSwap<ServerBrowserInfo>>,
+    _s2s: Option<crate::s2s::Server>,
 
     last_network_stats_time: Duration,
 
@@ -691,6 +693,19 @@ impl Server {
             Either::Left(network::network::utils::create_certifified_keys())
         };
 
+        let trusted_proxies = (!config_game.sv.trusted_proxy_hashes_file.is_empty()).then(|| {
+            let path = PathBuf::from(&config_game.sv.trusted_proxy_hashes_file);
+            let fs = io.fs.clone();
+            io.rt.spawn(async move {
+                let contents = fs
+                    .read_file_in(&path, FileSystemPath::OfType(FileSystemType::ReadWrite))
+                    .await?;
+                network::network::proxy::TrustedProxies::from_hash_list(std::str::from_utf8(
+                    &contents,
+                )?)
+            })
+        });
+
         let config_db = config_game.sv.db.clone();
         let accounts_enabled = !config_db.enable_accounts.is_empty();
         let task = Self::db_setup_task(&io.rt, config_db);
@@ -804,6 +819,16 @@ impl Server {
             .subject_public_key_info
             .fingerprint_bytes()?;
 
+        log::info!(
+            "server public-key hash: {}",
+            base::hash::fmt_hash(&cert_sha256_fingerprint)
+        );
+        let trusted_proxies = match trusted_proxies {
+            Some(task) => task.get()?,
+            None => network::network::proxy::TrustedProxies::default(),
+        };
+        let last_register_info =
+            Arc::new(arc_swap::ArcSwap::from_pointee(ServerBrowserInfo::default()));
         let (network_server, _cert, sock_addrs, _notifer_server) = Networks::init_server(
             config_game.sv.bind_addr_v4.parse()?,
             config_game.sv.bind_addr_v6.parse()?,
@@ -811,11 +836,12 @@ impl Server {
             port_v6,
             game_event_generator_server.clone(),
             NetworkServerCertMode::FromCertAndPrivateKey(Box::new(NetworkServerCertAndKey {
-                cert: cert_and_private_key.0,
-                private_key: cert_and_private_key.1,
+                cert: cert_and_private_key.0.clone(),
+                private_key: cert_and_private_key.1.clone(),
             })),
             &time,
             NetworkServerInitOptions::new()
+                .with_trusted_proxies(trusted_proxies.clone())
                 .with_max_thread_count(if shared_info.is_internal_server { 2 } else { 6 })
                 .with_disable_retry_on_connect(
                     config_engine.net.disable_retry_on_connect || shared_info.is_internal_server,
@@ -837,6 +863,34 @@ impl Server {
                 connection_plugins: Arc::new(connection_plugins),
             },
         )?;
+
+        let s2s = if trusted_proxies.public_key_hashes.is_empty() {
+            None
+        } else {
+            let addresses = [
+                SocketAddr::new(
+                    config_game.sv.bind_addr_v4.parse()?,
+                    config_game.sv.s2s_port_v4,
+                ),
+                SocketAddr::new(
+                    config_game.sv.bind_addr_v6.parse()?,
+                    config_game.sv.s2s_port_v6,
+                ),
+            ];
+            crate::s2s::Server::new(
+                &addresses,
+                &cert_and_private_key.0,
+                &cert_and_private_key.1,
+                trusted_proxies.clone(),
+                crate::s2s::router(
+                    last_register_info.clone(),
+                    crate::s2s::Ports {
+                        game_v4: sock_addrs[0].port(),
+                        game_v6: sock_addrs[1].port(),
+                    },
+                ),
+            )?
+        };
 
         let (db, game_db, accounts) = task.get()?;
 
@@ -984,6 +1038,8 @@ impl Server {
             last_register_time: None,
             register_task: None,
             last_register_serial: 0,
+            _s2s: s2s,
+            last_register_info,
 
             last_network_stats_time: time.now(),
 
@@ -2941,10 +2997,10 @@ impl Server {
             *browser_info = Some(register_info.clone())
         }
 
-        let register_info = loop {
+        let (register_info, browser_info) = loop {
             let json = serde_json::to_string(&register_info).unwrap();
             if json.len() <= 16 * 1024 {
-                break json;
+                break (json, register_info);
             } else {
                 // make sure no endless loop exists
                 // in worst case don't register at all.
@@ -2957,6 +3013,8 @@ impl Server {
                     .truncate(register_info.players.len() / 2);
             }
         };
+
+        self.last_register_info.store(Arc::new(browser_info));
 
         if !self.config_game.sv.register {
             return;

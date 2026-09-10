@@ -110,13 +110,13 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 
 /// hash certificate handler
 #[derive(Debug)]
-struct CertHashServerVerification {
+pub struct CertHashServerVerification {
     hash: Hash,
     provider: Arc<rustls::crypto::CryptoProvider>,
 }
 
 impl CertHashServerVerification {
-    fn new(provider: Arc<rustls::crypto::CryptoProvider>, hash: Hash) -> Arc<Self> {
+    pub fn new(provider: Arc<rustls::crypto::CryptoProvider>, hash: Hash) -> Arc<Self> {
         Arc::new(Self { hash, provider })
     }
 }
@@ -190,7 +190,7 @@ impl rustls::client::danger::ServerCertVerifier for CertHashServerVerification {
 /// ## Args
 ///
 /// - server_certs: a list of trusted certificates in DER format.
-fn configure_client(options: &NetworkClientInitOptions) -> anyhow::Result<ClientConfig> {
+pub fn configure_client(options: &NetworkClientInitOptions) -> anyhow::Result<ClientConfig> {
     let mut transport_config = TransportConfig::default();
     transport_config
         .max_concurrent_bidi_streams(NUM_BIDI_STREAMS.into())

@@ -9,3 +9,5 @@ pub mod network;
 pub mod player_input;
 pub mod server_browser;
 pub mod types;
+
+pub mod s2s;

@@ -854,6 +854,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-server"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "either",
+ "fs-err",
+ "http 1.5.0",
+ "http-body 1.1.0",
+ "hyper 1.11.0",
+ "hyper-util",
+ "pin-project-lite",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
+]
+
+[[package]]
 name = "az"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4392,6 +4414,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8866fac38f53fc87fa3ae1b09ddd723e0482f8fa74323518b4c59df2c55a00a"
 
 [[package]]
+name = "fs-err"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91aa448ca50d7e79433bdf3ee8d99215430d2ec02ade5aefab2a073a1822e8a"
+dependencies = [
+ "autocfg",
+ "tokio",
+]
+
+[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4659,7 +4691,10 @@ name = "game-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-trait",
+ "axum",
+ "axum-server",
  "base",
  "base-fs",
  "base-http",
@@ -4689,6 +4724,7 @@ dependencies = [
  "game-network",
  "game-state-wasm",
  "http-accounts",
+ "hyper-util",
  "log 0.4.33",
  "map",
  "map-convert-lib",
@@ -4698,10 +4734,13 @@ dependencies = [
  "rand 0.10.2",
  "rayon",
  "rustc-hash 2.1.3",
+ "rustls",
  "serde",
  "serde_json",
  "sql",
  "thread-priority",
+ "tokio",
+ "tokio-rustls",
  "tracing",
  "vanilla",
  "x509-cert",
@@ -9030,6 +9069,36 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "reverse-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "axum",
+ "base",
+ "base-fs",
+ "base-io",
+ "base-io-traits",
+ "clap 4.6.6",
+ "ed25519-dalek",
+ "game-base",
+ "game-server",
+ "hex",
+ "master-server-types",
+ "network",
+ "pool",
+ "quinn 0.11.7",
+ "rand 0.10.2",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "x509-cert",
 ]
 
 [[package]]

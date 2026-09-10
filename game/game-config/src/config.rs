@@ -597,6 +597,16 @@ pub struct ConfigServer {
     #[default = ""]
     pub private_key_file: String,
 
+    /// Proxy hash list in writable storage, loaded at startup. Empty disables proxy trust.
+    #[default = ""]
+    pub trusted_proxy_hashes_file: String,
+
+    /// HTTPS control ports, bound on the game bind addresses only when proxies are trusted.
+    #[default = 8315]
+    pub s2s_port_v4: u16,
+    #[default = 8316]
+    pub s2s_port_v6: u16,
+
     #[conf_valid(length(max = MAX_SERVER_NAME_LEN))]
     #[default = "unnamed server"]
     pub name: String,
