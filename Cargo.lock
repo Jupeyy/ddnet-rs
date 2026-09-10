@@ -9778,7 +9778,6 @@ dependencies = [
  "env_logger",
  "game-base",
  "game-server",
- "network",
 ]
 
 [[package]]
