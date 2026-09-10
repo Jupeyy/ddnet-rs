@@ -20,9 +20,7 @@ pub fn render(ui: &mut egui::Ui, pipe: &mut UiRenderPipe<UserData>, ui_state: &m
             ui.with_layout(
                 Layout::top_down(egui::Align::Min)
                     .with_main_align(egui::Align::Min)
-                    .with_main_justify(true)
-                    .with_cross_justify(true)
-                    .with_main_wrap(true),
+                    .with_cross_justify(true),
                 |ui| {
                     let current_active = pipe
                         .user_data
