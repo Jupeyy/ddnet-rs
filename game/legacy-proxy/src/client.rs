@@ -114,7 +114,10 @@ impl SocketClient {
         })
     }
     pub fn sends<'a, S: Into<System<'a>>>(&mut self, msg: S) {
-        Self::sends_impl(msg.into(), true, self)
+        let msg = msg.into();
+        // DDNet rejects NETMSG_INPUT chunks carrying the vital flag.
+        let vital = !matches!(&msg, System::Input(_));
+        Self::sends_impl(msg, vital, self)
     }
     pub fn sendg<'a, G: Into<Game<'a>>>(&mut self, msg: G) {
         fn inner(msg: Game, socket_client: &mut SocketClient) {
